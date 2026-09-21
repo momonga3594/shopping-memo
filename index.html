@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#2d6a4f" />
+    <meta name="description" content="買い物メモ — シンプルな買い物リスト" />
+    <title>買い物メモ</title>
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <div id="app">
+      <header class="header">
+        <h1 class="title">買い物メモ</h1>
+        <p class="subtitle">買うものをメモしましょう</p>
+      </header>
+
+      <form id="add-form" class="add-form" autocomplete="off">
+        <div class="input-row">
+          <input
+            id="item-input"
+            type="text"
+            class="item-input"
+            placeholder="買うものを入力…"
+            enterkeyhint="done"
+            maxlength="100"
+            aria-label="買うもの"
+          />
+          <button
+            type="button"
+            id="mic-btn"
+            class="mic-btn"
+            aria-label="音声入力"
+            title="音声入力"
+            hidden
+          >
+            <span class="mic-icon" aria-hidden="true">🎤</span>
+          </button>
+        </div>
+        <div class="qty-row">
+          <label for="qty-input" class="qty-label">数量（任意）</label>
+          <input
+            id="qty-input"
+            type="text"
+            class="qty-input"
+            placeholder="例: 2個"
+            maxlength="20"
+            aria-label="数量"
+          />
+        </div>
+        <button type="submit" class="add-btn">追加</button>
+      </form>
+
+      <p id="voice-status" class="voice-status" role="status" aria-live="polite"></p>
+      <p id="voice-note" class="voice-note" hidden></p>
+
+      <div class="list-toolbar">
+        <span id="item-count" class="item-count"></span>
+        <button type="button" id="clear-done-btn" class="clear-done-btn" disabled>
+          完了を消す
+        </button>
+      </div>
+
+      <ul id="item-list" class="item-list" aria-label="買い物リスト"></ul>
+
+      <p id="empty-state" class="empty-state">まだ何もありません。<br />上から追加してください。</p>
+    </div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>

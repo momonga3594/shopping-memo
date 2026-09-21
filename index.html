@@ -11,21 +11,32 @@
   <body>
     <div id="app">
       <header class="header">
-        <h1 class="title">買い物メモ</h1>
+        <div class="header-top">
+          <h1 class="title">買い物メモ</h1>
+          <button
+            type="button"
+            id="settings-btn"
+            class="settings-btn"
+            aria-label="設定"
+            title="設定"
+          >
+            ⚙️
+          </button>
+        </div>
         <p class="subtitle">買うものをメモしましょう</p>
       </header>
 
       <form id="add-form" class="add-form" autocomplete="off">
         <div class="input-row">
-          <input
+          <textarea
             id="item-input"
-            type="text"
             class="item-input"
-            placeholder="買うものを入力…"
+            placeholder="買うものを入力…（複数でもOK）"
+            rows="2"
+            maxlength="500"
             enterkeyhint="done"
-            maxlength="100"
             aria-label="買うもの"
-          />
+          ></textarea>
           <button
             type="button"
             id="mic-btn"
@@ -48,7 +59,12 @@
             aria-label="数量"
           />
         </div>
-        <button type="submit" class="add-btn">追加</button>
+        <div class="action-row">
+          <button type="submit" class="add-btn">追加</button>
+          <button type="button" id="ai-organize-btn" class="ai-btn">
+            AIで整理
+          </button>
+        </div>
       </form>
 
       <p id="voice-status" class="voice-status" role="status" aria-live="polite"></p>
@@ -65,6 +81,43 @@
 
       <p id="empty-state" class="empty-state">まだ何もありません。<br />上から追加してください。</p>
     </div>
+
+    <dialog id="settings-dialog" class="settings-dialog">
+      <form method="dialog" id="settings-form" class="settings-panel">
+        <div class="settings-header">
+          <h2 class="settings-title">設定</h2>
+          <button type="submit" class="settings-close" aria-label="閉じる" value="close">
+            ×
+          </button>
+        </div>
+        <label for="api-key-input" class="settings-label">Google Gemini API キー</label>
+        <input
+          id="api-key-input"
+          type="password"
+          class="api-key-input"
+          placeholder="AIza…"
+          autocomplete="off"
+          spellcheck="false"
+        />
+        <p class="settings-help">
+          キーは
+          <a
+            href="https://aistudio.google.com/apikey"
+            target="_blank"
+            rel="noopener noreferrer"
+            >Google AI Studio</a
+          >
+          で取得できます。このブラウザの localStorage
+          にだけ保存され、サーバーには送られません。
+        </p>
+        <div class="settings-actions">
+          <button type="button" id="save-key-btn" class="save-key-btn">保存</button>
+          <button type="button" id="clear-key-btn" class="clear-key-btn">クリア</button>
+        </div>
+        <p id="settings-status" class="settings-status" role="status" aria-live="polite"></p>
+      </form>
+    </dialog>
+
     <script type="module" src="/src/main.js"></script>
   </body>
 </html>

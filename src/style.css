@@ -4,6 +4,8 @@
   --primary: #2d6a4f;
   --primary-dark: #1b4332;
   --primary-light: #40916c;
+  --ai: #1d4ed8;
+  --ai-dark: #1e3a8a;
   --danger: #c1121f;
   --danger-bg: #ffe5e5;
   --muted: #6b7280;
@@ -49,12 +51,41 @@ body {
   padding-top: 8px;
 }
 
+.header-top {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+}
+
 .title {
   margin: 0;
   font-size: 1.75rem;
   font-weight: 700;
   color: var(--primary-dark);
   letter-spacing: 0.04em;
+}
+
+.settings-btn {
+  position: absolute;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 44px;
+  height: 44px;
+  border: 2px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  font-size: 1.2rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: var(--shadow);
+}
+
+.settings-btn:active {
+  transform: translateY(-50%) scale(0.96);
 }
 
 .subtitle {
@@ -89,6 +120,9 @@ body {
   outline: none;
   background: #fafafa;
   transition: border-color 0.15s;
+  resize: vertical;
+  font-family: inherit;
+  line-height: 1.4;
 }
 
 .item-input:focus {
@@ -108,6 +142,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
+  align-self: flex-start;
   transition: background 0.15s, border-color 0.15s, transform 0.1s;
 }
 
@@ -159,22 +194,47 @@ body {
   background: #fff;
 }
 
-.add-btn {
+.action-row {
+  display: flex;
+  gap: 8px;
+}
+
+.add-btn,
+.ai-btn {
+  flex: 1;
   min-height: var(--tap);
   border: none;
   border-radius: 12px;
-  background: var(--primary);
   color: #fff;
-  font-size: 1.1rem;
+  font-size: 1.05rem;
   font-weight: 700;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.06em;
   cursor: pointer;
-  transition: background 0.15s, transform 0.1s;
+  transition: background 0.15s, transform 0.1s, opacity 0.15s;
+}
+
+.add-btn {
+  background: var(--primary);
 }
 
 .add-btn:active {
   background: var(--primary-dark);
   transform: scale(0.98);
+}
+
+.ai-btn {
+  background: var(--ai);
+}
+
+.ai-btn:active {
+  background: var(--ai-dark);
+  transform: scale(0.98);
+}
+
+.ai-btn:disabled,
+.ai-btn.busy {
+  opacity: 0.65;
+  cursor: wait;
 }
 
 .voice-status {
@@ -327,6 +387,123 @@ body {
 
 .empty-state.hidden {
   display: none;
+}
+
+/* Settings dialog */
+.settings-dialog {
+  border: none;
+  border-radius: 16px;
+  padding: 0;
+  max-width: 420px;
+  width: calc(100% - 32px);
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.2);
+}
+
+.settings-dialog::backdrop {
+  background: rgba(15, 23, 42, 0.45);
+}
+
+.settings-panel {
+  margin: 0;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.settings-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 4px;
+}
+
+.settings-title {
+  margin: 0;
+  font-size: 1.2rem;
+  color: var(--primary-dark);
+}
+
+.settings-close {
+  width: 40px;
+  height: 40px;
+  border: none;
+  border-radius: 10px;
+  background: transparent;
+  font-size: 1.4rem;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.settings-label {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #374151;
+}
+
+.api-key-input {
+  min-height: 44px;
+  padding: 10px 12px;
+  font-size: 0.95rem;
+  border: 2px solid var(--border);
+  border-radius: 10px;
+  outline: none;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+.api-key-input:focus {
+  border-color: var(--primary-light);
+}
+
+.settings-help {
+  margin: 0;
+  font-size: 0.82rem;
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+.settings-help a {
+  color: var(--ai);
+}
+
+.settings-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.save-key-btn,
+.clear-key-btn {
+  flex: 1;
+  min-height: 44px;
+  border-radius: 10px;
+  font-size: 0.95rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.save-key-btn {
+  border: none;
+  background: var(--primary);
+  color: #fff;
+}
+
+.clear-key-btn {
+  border: 2px solid var(--border);
+  background: #fff;
+  color: var(--danger);
+}
+
+.settings-status {
+  min-height: 1.3em;
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--primary);
+  text-align: center;
+}
+
+.settings-status.error {
+  color: var(--danger);
 }
 
 @media (min-width: 480px) {

@@ -2,14 +2,26 @@
 <html lang="ja">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1"
+    />
     <meta name="theme-color" content="#2d6a4f" />
-    <meta name="description" content="買い物メモ — シンプルな買い物リスト" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="買い物メモ" />
+    <meta
+      name="description"
+      content="スマホ向けのシンプルな買い物リスト。音声入力とAI整理対応。ホーム画面に追加してアプリのように使えます。"
+    />
     <title>買い物メモ</title>
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="./apple-touch-icon.png" />
+    <link rel="icon" type="image/png" sizes="192x192" href="./icon-192.png" />
     <link rel="stylesheet" href="/src/style.css" />
   </head>
   <body>
-    <div id="app">
+    <div id="app" class="app">
       <header class="header">
         <div class="header-top">
           <h1 class="title">買い物メモ</h1>
@@ -23,67 +35,70 @@
             ⚙️
           </button>
         </div>
-        <p class="subtitle">買うものをメモしましょう</p>
+        <div class="list-toolbar">
+          <span id="item-count" class="item-count"></span>
+          <button type="button" id="clear-done-btn" class="clear-done-btn" disabled>
+            完了を消す
+          </button>
+        </div>
       </header>
 
-      <form id="add-form" class="add-form" autocomplete="off">
-        <div class="input-row">
-          <textarea
-            id="item-input"
-            class="item-input"
-            placeholder="買うものを入力…（複数でもOK）"
-            rows="2"
-            maxlength="500"
-            enterkeyhint="done"
-            aria-label="買うもの"
-          ></textarea>
-          <button
-            type="button"
-            id="mic-btn"
-            class="mic-btn"
-            aria-label="音声入力"
-            title="音声入力"
-            hidden
-          >
-            <span class="mic-icon" aria-hidden="true">🎤</span>
-          </button>
-        </div>
-        <div class="qty-row">
-          <label for="qty-input" class="qty-label">数量（任意）</label>
-          <input
-            id="qty-input"
-            type="text"
-            class="qty-input"
-            placeholder="例: 2個"
-            maxlength="20"
-            aria-label="数量"
-          />
-        </div>
-        <div class="action-row">
-          <button type="submit" class="add-btn">追加</button>
-          <button type="button" id="ai-organize-btn" class="ai-btn">
-            AIで整理
-          </button>
-        </div>
-      </form>
+      <main class="main">
+        <ul id="item-list" class="item-list" aria-label="買い物リスト"></ul>
+        <p id="empty-state" class="empty-state">
+          まだ何もありません。<br />下の欄から追加してください。
+        </p>
+      </main>
 
-      <p id="voice-status" class="voice-status" role="status" aria-live="polite"></p>
-      <p id="voice-note" class="voice-note" hidden></p>
-
-      <div class="list-toolbar">
-        <span id="item-count" class="item-count"></span>
-        <button type="button" id="clear-done-btn" class="clear-done-btn" disabled>
-          完了を消す
-        </button>
-      </div>
-
-      <ul id="item-list" class="item-list" aria-label="買い物リスト"></ul>
-
-      <p id="empty-state" class="empty-state">まだ何もありません。<br />上から追加してください。</p>
+      <footer class="composer" role="region" aria-label="追加パネル">
+        <p id="voice-status" class="voice-status" role="status" aria-live="polite"></p>
+        <p id="voice-note" class="voice-note" hidden></p>
+        <form id="add-form" class="add-form" autocomplete="off">
+          <div class="input-row">
+            <textarea
+              id="item-input"
+              class="item-input"
+              placeholder="買うものを入力…（複数でもOK）"
+              rows="2"
+              maxlength="500"
+              enterkeyhint="done"
+              aria-label="買うもの"
+            ></textarea>
+            <button
+              type="button"
+              id="mic-btn"
+              class="mic-btn"
+              aria-label="音声入力"
+              title="音声入力"
+              hidden
+            >
+              <span class="mic-icon" aria-hidden="true">🎤</span>
+            </button>
+          </div>
+          <div class="qty-row">
+            <label for="qty-input" class="qty-label">数量（任意）</label>
+            <input
+              id="qty-input"
+              type="text"
+              class="qty-input"
+              placeholder="例: 2個"
+              maxlength="20"
+              aria-label="数量"
+            />
+          </div>
+          <div class="action-row">
+            <button type="submit" class="add-btn">追加</button>
+            <button type="button" id="ai-organize-btn" class="ai-btn">
+              AIで整理
+            </button>
+          </div>
+        </form>
+      </footer>
     </div>
 
     <dialog id="settings-dialog" class="settings-dialog">
       <form method="dialog" id="settings-form" class="settings-panel">
+        <div class="settings-handle" aria-hidden="true"></div>
         <div class="settings-header">
           <h2 class="settings-title">設定</h2>
           <button type="submit" class="settings-close" aria-label="閉じる" value="close">

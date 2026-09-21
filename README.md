@@ -1,6 +1,6 @@
 # 買い物メモ
 
-モバイル向けのシンプルな買い物リスト Web アプリです。ログイン不要・サーバー不要で、ブラウザの `localStorage` に保存します。音声入力（Web Speech API）と、Google Gemini による AI 整理にも対応しています。
+スマートフォン縦画面を最優先にした、シンプルな買い物リスト Web アプリです。ログイン不要・サーバー不要で、ブラウザの `localStorage` に保存します。音声入力（Web Speech API）と、Google Gemini による AI 整理にも対応しています。
 
 公開 URL: https://momonga3594.github.io/shopping-memo/
 
@@ -13,6 +13,15 @@
 - 完了済みをまとめて削除
 - ページ再読み込み後も内容を保持（localStorage）
 - マイクボタンで日本語の音声入力（`ja-JP`）
+- **モバイルファースト UI**: 下部に追加／AI／マイク操作、大きなタップ領域、ノッチ・ホームインジケータ対応
+- ホーム画面追加向け（Web App Manifest / テーマカラー / apple-touch-icon）
+
+## ホーム画面に追加（おすすめ）
+
+アプリのように全画面で使うと片手操作しやすいです。
+
+- **iPhone / iPad (Safari)**: 共有 → 「ホーム画面に追加」
+- **Android (Chrome)**: メニュー（⋮）→ 「ホーム画面に追加」または「アプリをインストール」
 
 ## AIで整理（Gemini）の使い方
 

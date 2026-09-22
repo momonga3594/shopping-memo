@@ -12,7 +12,7 @@
     <meta name="apple-mobile-web-app-title" content="買い物メモ" />
     <meta
       name="description"
-      content="スマホ向けのシンプルな買い物リスト。音声入力とAI整理対応。ホーム画面に追加してアプリのように使えます。"
+      content="スマホ向けのシンプルな買い物リスト。購入先ごとの整理、音声入力とAI整理対応。ホーム画面に追加してアプリのように使えます。"
     />
     <title>買い物メモ</title>
     <link rel="manifest" href="./manifest.webmanifest" />
@@ -75,16 +75,31 @@
               <span class="mic-icon" aria-hidden="true">🎤</span>
             </button>
           </div>
-          <div class="qty-row">
-            <label for="qty-input" class="qty-label">数量（任意）</label>
-            <input
-              id="qty-input"
-              type="text"
-              class="qty-input"
-              placeholder="例: 2個"
-              maxlength="20"
-              aria-label="数量"
-            />
+          <div class="meta-row">
+            <div class="meta-field">
+              <label for="qty-input" class="meta-label">数量（任意）</label>
+              <input
+                id="qty-input"
+                type="text"
+                class="meta-input"
+                placeholder="例: 2個"
+                maxlength="20"
+                aria-label="数量"
+              />
+            </div>
+            <div class="meta-field">
+              <label for="store-input" class="meta-label">購入先（任意）</label>
+              <input
+                id="store-input"
+                type="text"
+                class="meta-input"
+                list="store-suggestions"
+                placeholder="例: イオン"
+                maxlength="40"
+                aria-label="購入先"
+              />
+              <datalist id="store-suggestions"></datalist>
+            </div>
           </div>
           <div class="action-row">
             <button type="submit" class="add-btn">追加</button>

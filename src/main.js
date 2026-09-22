@@ -1,5 +1,6 @@
 const STORAGE_KEY = 'shopping-memo-items';
 const API_KEY_STORAGE = 'shopping-memo-gemini-key';
+const UNSET_STORE_LABEL = '未設定';
 
 /** Primary + fallbacks if a model name is unavailable */
 const GEMINI_MODELS = [
@@ -8,12 +9,14 @@ const GEMINI_MODELS = [
   'gemini-2.0-flash',
 ];
 
-/** @typedef {{ id: string, name: string, qty: string, done: boolean }} Item */
+/** @typedef {{ id: string, name: string, qty: string, store: string, done: boolean }} Item */
 
 const els = {
   form: document.getElementById('add-form'),
   input: document.getElementById('item-input'),
   qty: document.getElementById('qty-input'),
+  store: document.getElementById('store-input'),
+  storeSuggestions: document.getElementById('store-suggestions'),
   list: document.getElementById('item-list'),
   empty: document.getElementById('empty-state'),
   count: document.getElementById('item-count'),
@@ -40,6 +43,10 @@ function uid() {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
+function normalizeStore(value) {
+  return String(value || '').trim();
+}
+
 function loadItems() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
@@ -52,6 +59,8 @@ function loadItems() {
         id: String(x.id || uid()),
         name: String(x.name).trim(),
         qty: String(x.qty || '').trim(),
+        // Migration: old items without store → empty string
+        store: normalizeStore(x.store),
         done: Boolean(x.done),
       }))
       .filter((x) => x.name);
@@ -91,6 +100,52 @@ function setSettingsStatus(text, isError = false) {
   els.settingsStatus.classList.toggle('error', isError);
 }
 
+/** Recent / used store names for suggestions (non-empty, unique, sorted ja). */
+function getUsedStores() {
+  const set = new Set();
+  for (const item of items) {
+    const s = normalizeStore(item.store);
+    if (s) set.add(s);
+  }
+  return [...set].sort((a, b) => a.localeCompare(b, 'ja'));
+}
+
+function refreshStoreSuggestions() {
+  if (!els.storeSuggestions) return;
+  els.storeSuggestions.innerHTML = '';
+  for (const store of getUsedStores()) {
+    const opt = document.createElement('option');
+    opt.value = store;
+    els.storeSuggestions.appendChild(opt);
+  }
+}
+
+/**
+ * Group items by store. Non-empty stores sorted alphabetically (ja);
+ * 「未設定」(empty) last. Within a group, preserve items[] order.
+ * @returns {{ key: string, label: string, items: Item[] }[]}
+ */
+function groupItemsByStore(list) {
+  /** @type {Map<string, Item[]>} */
+  const map = new Map();
+  for (const item of list) {
+    const key = normalizeStore(item.store);
+    if (!map.has(key)) map.set(key, []);
+    map.get(key).push(item);
+  }
+  const keys = [...map.keys()].sort((a, b) => {
+    if (!a && !b) return 0;
+    if (!a) return 1; // 未設定 last
+    if (!b) return -1;
+    return a.localeCompare(b, 'ja');
+  });
+  return keys.map((key) => ({
+    key,
+    label: key || UNSET_STORE_LABEL,
+    items: map.get(key),
+  }));
+}
+
 function render() {
   els.list.innerHTML = '';
   const remaining = items.filter((i) => !i.done).length;
@@ -108,54 +163,160 @@ function render() {
   }
 
   els.clearDone.disabled = doneCount === 0;
+  refreshStoreSuggestions();
 
-  for (const item of items) {
-    const li = document.createElement('li');
-    li.className = `item${item.done ? ' done' : ''}`;
-    li.dataset.id = item.id;
+  const groups = groupItemsByStore(items);
+  for (const group of groups) {
+    const header = document.createElement('li');
+    header.className = 'store-group-header';
+    header.setAttribute('role', 'presentation');
+    const title = document.createElement('span');
+    title.className = 'store-group-title';
+    title.textContent = group.label;
+    const badge = document.createElement('span');
+    badge.className = 'store-group-count';
+    badge.textContent = `${group.items.length}`;
+    header.append(title, badge);
+    els.list.appendChild(header);
 
-    const toggle = document.createElement('button');
-    toggle.type = 'button';
-    toggle.className = 'toggle-btn';
-    toggle.setAttribute(
-      'aria-label',
-      item.done ? `${item.name}を未完了に戻す` : `${item.name}を完了にする`,
-    );
-    toggle.textContent = '✓';
-    toggle.addEventListener('click', () => toggleItem(item.id));
-
-    const body = document.createElement('div');
-    body.className = 'item-body';
-    const name = document.createElement('span');
-    name.className = 'item-name';
-    name.textContent = item.name;
-    body.appendChild(name);
-    if (item.qty) {
-      const qty = document.createElement('span');
-      qty.className = 'item-qty';
-      qty.textContent = item.qty;
-      body.appendChild(qty);
+    for (const item of group.items) {
+      els.list.appendChild(createItemElement(item));
     }
-
-    const del = document.createElement('button');
-    del.type = 'button';
-    del.className = 'delete-btn';
-    del.setAttribute('aria-label', `${item.name}を削除`);
-    del.textContent = '×';
-    del.addEventListener('click', () => deleteItem(item.id));
-
-    li.append(toggle, body, del);
-    els.list.appendChild(li);
   }
 }
 
-function addItem(name, qty = '') {
+function createItemElement(item) {
+  const li = document.createElement('li');
+  li.className = `item${item.done ? ' done' : ''}`;
+  li.dataset.id = item.id;
+
+  const toggle = document.createElement('button');
+  toggle.type = 'button';
+  toggle.className = 'toggle-btn';
+  toggle.setAttribute(
+    'aria-label',
+    item.done ? `${item.name}を未完了に戻す` : `${item.name}を完了にする`,
+  );
+  toggle.textContent = '✓';
+  toggle.addEventListener('click', () => toggleItem(item.id));
+
+  const body = document.createElement('div');
+  body.className = 'item-body';
+  const name = document.createElement('span');
+  name.className = 'item-name';
+  name.textContent = item.name;
+  body.appendChild(name);
+  if (item.qty) {
+    const qty = document.createElement('span');
+    qty.className = 'item-qty';
+    qty.textContent = item.qty;
+    body.appendChild(qty);
+  }
+
+  const storeBtn = document.createElement('button');
+  storeBtn.type = 'button';
+  storeBtn.className = `item-store${item.store ? '' : ' unset'}`;
+  storeBtn.textContent = item.store
+    ? `📍 ${item.store}`
+    : `📍 ${UNSET_STORE_LABEL}`;
+  storeBtn.setAttribute(
+    'aria-label',
+    item.store
+      ? `${item.name}の購入先（${item.store}）。タップして変更`
+      : `${item.name}の購入先を設定`,
+  );
+  storeBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    beginStoreEdit(li, item);
+  });
+  body.appendChild(storeBtn);
+
+  const del = document.createElement('button');
+  del.type = 'button';
+  del.className = 'delete-btn';
+  del.setAttribute('aria-label', `${item.name}を削除`);
+  del.textContent = '×';
+  del.addEventListener('click', () => deleteItem(item.id));
+
+  li.append(toggle, body, del);
+  return li;
+}
+
+/** Inline edit for an item's store (mobile-friendly). */
+function beginStoreEdit(li, item) {
+  const existing = li.querySelector('.store-edit');
+  if (existing) {
+    existing.querySelector('input')?.focus();
+    return;
+  }
+
+  const body = li.querySelector('.item-body');
+  const storeBtn = body?.querySelector('.item-store');
+  if (!body || !storeBtn) return;
+
+  storeBtn.hidden = true;
+
+  const wrap = document.createElement('div');
+  wrap.className = 'store-edit';
+
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.className = 'store-edit-input';
+  input.value = item.store || '';
+  input.placeholder = '購入先（空で未設定）';
+  input.maxLength = 40;
+  input.setAttribute('list', 'store-suggestions');
+  input.setAttribute('aria-label', `${item.name}の購入先`);
+
+  const saveBtn = document.createElement('button');
+  saveBtn.type = 'button';
+  saveBtn.className = 'store-edit-save';
+  saveBtn.textContent = '保存';
+
+  wrap.append(input, saveBtn);
+  body.appendChild(wrap);
+  input.focus();
+  input.select();
+
+  let finished = false;
+  const finish = (commit) => {
+    if (finished) return;
+    finished = true;
+    if (commit) {
+      updateItemStore(item.id, input.value);
+    } else {
+      render();
+    }
+  };
+
+  saveBtn.addEventListener('click', () => finish(true));
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      finish(true);
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      finish(false);
+    }
+  });
+  input.addEventListener('blur', () => {
+    // Allow save button click to fire first
+    setTimeout(() => {
+      if (!finished && !wrap.contains(document.activeElement)) {
+        finish(true);
+      }
+    }, 120);
+  });
+}
+
+function addItem(name, qty = '', store = '') {
   const trimmed = name.trim();
   if (!trimmed) return;
   items.unshift({
     id: uid(),
     name: trimmed,
     qty: qty.trim(),
+    store: normalizeStore(store),
     done: false,
   });
   saveItems();
@@ -169,15 +330,21 @@ function addItemsFromAi(extracted) {
     const name = String(raw.name || '').trim();
     if (!name) continue;
     const qty = String(raw.quantity ?? raw.qty ?? '').trim();
+    const store = normalizeStore(raw.store ?? raw.destination ?? '');
     const key = name.toLowerCase();
     const exists = items.some(
-      (i) => !i.done && i.name.toLowerCase() === key && (i.qty || '') === qty,
+      (i) =>
+        !i.done &&
+        i.name.toLowerCase() === key &&
+        (i.qty || '') === qty &&
+        (i.store || '') === store,
     );
     if (exists) continue;
     items.unshift({
       id: uid(),
       name,
       qty,
+      store,
       done: false,
     });
     added.push(name);
@@ -187,6 +354,14 @@ function addItemsFromAi(extracted) {
     render();
   }
   return added.length;
+}
+
+function updateItemStore(id, store) {
+  const item = items.find((i) => i.id === id);
+  if (!item) return;
+  item.store = normalizeStore(store);
+  saveItems();
+  render();
 }
 
 function toggleItem(id) {
@@ -211,9 +386,10 @@ function clearDone() {
 
 els.form.addEventListener('submit', (e) => {
   e.preventDefault();
-  addItem(els.input.value, els.qty.value);
+  addItem(els.input.value, els.qty.value, els.store.value);
   els.input.value = '';
   els.qty.value = '';
+  // Keep store value for consecutive adds to the same destination
   els.input.focus();
 });
 
@@ -264,7 +440,11 @@ function buildOrganizePrompt(text) {
     '次の日本語の自由文・音声認識テキストから、買い物アイテムだけを抽出してください。',
     '雑談や買い物以外の内容は無視し、似たアイテムは合理的にまとめてください。',
     '数量が分かる場合は quantity に短い日本語（例: "2個", "1パック"）で入れてください。分からなければ空文字か省略。',
-    '出力は JSON 配列のみ。形式: [{"name":"牛乳","quantity":"1本"},{"name":"卵"}]',
+    '購入先（店名・行き先）が文中で明確な場合のみ store に入れてください。',
+    '例: 「イオンで牛乳と卵」→ [{"name":"牛乳","store":"イオン"},{"name":"卵","store":"イオン"}]',
+    '例: 「原信で豆腐、洗剤も」→ 豆腐は store:"原信"。洗剤の購入先が不明なら store は空か省略。',
+    '推測や一般論で店名を付けないでください。不明なら store を省略または空文字。',
+    '出力は JSON 配列のみ。形式: [{"name":"牛乳","quantity":"1本","store":"イオン"},{"name":"卵"}]',
     'アイテムが無い場合は [] を返してください。説明文やコードフェンスは付けないでください。',
     '',
     '【テキスト】',
@@ -356,12 +536,12 @@ async function callGemini(apiKey, model, userText) {
     throw err;
   }
 
-  const text =
+  const textOut =
     data?.candidates?.[0]?.content?.parts
       ?.map((p) => p.text || '')
       .join('') || '';
 
-  if (!text) {
+  if (!textOut) {
     const block = data?.promptFeedback?.blockReason;
     const err = new Error(
       block
@@ -372,7 +552,7 @@ async function callGemini(apiKey, model, userText) {
     throw err;
   }
 
-  return extractJsonArray(text);
+  return extractJsonArray(textOut);
 }
 
 async function callGeminiWithFallback(apiKey, userText) {
@@ -385,7 +565,7 @@ async function callGeminiWithFallback(apiKey, userText) {
       lastError = err;
       const retry =
         err.code === 'model_not_found' ||
-        (err.status === 404) ||
+        err.status === 404 ||
         (typeof err.body === 'string' &&
           /not found|NOT_FOUND|unsupported/i.test(err.body));
       if (retry && i < GEMINI_MODELS.length - 1) {
@@ -443,16 +623,16 @@ async function callGeminiPlain(apiKey, model, userText) {
   }
 
   const data = JSON.parse(bodyText);
-  const text =
+  const textOut =
     data?.candidates?.[0]?.content?.parts
       ?.map((p) => p.text || '')
       .join('') || '';
-  if (!text) {
+  if (!textOut) {
     const err = new Error('AIから有効な応答がありませんでした。');
     err.code = 'empty';
     throw err;
   }
-  return extractJsonArray(text);
+  return extractJsonArray(textOut);
 }
 
 function friendlyAiError(err) {
@@ -495,6 +675,16 @@ async function organizeWithAi() {
 
   try {
     const extracted = await callGeminiWithFallback(apiKey, text);
+    // If composer has a store set and AI omitted store, apply as fallback
+    const fallbackStore = normalizeStore(els.store.value);
+    if (fallbackStore) {
+      for (const raw of extracted) {
+        if (!raw || typeof raw !== 'object') continue;
+        if (!normalizeStore(raw.store ?? raw.destination ?? '')) {
+          raw.store = fallbackStore;
+        }
+      }
+    }
     const count = addItemsFromAi(extracted);
     if (count === 0) {
       setStatus('買い物アイテムが見つかりませんでした', true);

@@ -12,14 +12,14 @@
     <meta name="apple-mobile-web-app-title" content="買い物メモ" />
     <meta
       name="description"
-      content="スマホ向けのシンプルな買い物リスト。購入先ごとの整理、音声入力とAI整理対応。ホーム画面に追加してアプリのように使えます。"
+      content="スマホ向けのシンプルな買い物リスト。購入先ごとの整理、音声入力・AI整理・チラシ画像からの追加に対応。ホーム画面に追加してアプリのように使えます。"
     />
     <title>買い物メモ</title>
     <link rel="manifest" href="./manifest.webmanifest" />
     <link rel="apple-touch-icon" href="./apple-touch-icon.png" />
     <link rel="icon" type="image/png" sizes="192x192" href="./icon-192.png" />
-    <script type="module" crossorigin src="/shopping-memo/assets/index-DTH7AK4i.js"></script>
-    <link rel="stylesheet" crossorigin href="/shopping-memo/assets/index--D1zMH0t.css">
+    <script type="module" crossorigin src="/shopping-memo/assets/index-smx_qqIy.js"></script>
+    <link rel="stylesheet" crossorigin href="/shopping-memo/assets/index-opI4rAub.css">
   </head>
   <body>
     <div id="app" class="app">
@@ -108,9 +108,90 @@
               AIで整理
             </button>
           </div>
+          <div class="action-row secondary-actions">
+            <button type="button" id="flyer-btn" class="flyer-btn">
+              チラシから追加
+            </button>
+          </div>
         </form>
       </footer>
     </div>
+
+    <dialog id="flyer-dialog" class="flyer-dialog">
+      <div class="flyer-panel">
+        <div class="settings-handle" aria-hidden="true"></div>
+        <div class="settings-header">
+          <h2 class="settings-title">チラシから追加</h2>
+          <button
+            type="button"
+            id="flyer-close-btn"
+            class="settings-close"
+            aria-label="閉じる"
+          >
+            ×
+          </button>
+        </div>
+
+        <section class="flyer-section" aria-label="画像の選択">
+          <label class="flyer-file-label" for="flyer-file-input">
+            <span class="flyer-file-btn">写真・ギャラリー</span>
+            <input
+              id="flyer-file-input"
+              type="file"
+              accept="image/*"
+              class="flyer-file-input"
+            />
+          </label>
+
+          <div class="flyer-url-row">
+            <input
+              id="flyer-url-input"
+              type="url"
+              class="flyer-url-input"
+              placeholder="https://… 画像URL"
+              inputmode="url"
+              autocomplete="off"
+              spellcheck="false"
+              aria-label="チラシ画像のURL"
+            />
+            <button type="button" id="flyer-url-btn" class="flyer-url-btn">
+              URLから読み込み
+            </button>
+          </div>
+
+          <p class="flyer-help">
+            ネットのチラシはURLが取れないことが多いです。その場合はスクショ／保存して写真から追加してください。
+          </p>
+
+          <div id="flyer-preview-wrap" class="flyer-preview-wrap" hidden>
+            <img id="flyer-preview" class="flyer-preview" alt="選択したチラシのプレビュー" />
+          </div>
+
+          <p id="flyer-status" class="flyer-status" role="status" aria-live="polite"></p>
+        </section>
+
+        <section id="flyer-review" class="flyer-review" hidden aria-label="抽出結果の確認">
+          <div class="flyer-review-toolbar">
+            <button type="button" id="flyer-select-all" class="flyer-link-btn">
+              すべて選択
+            </button>
+            <button type="button" id="flyer-deselect-all" class="flyer-link-btn">
+              すべて解除
+            </button>
+          </div>
+          <ul id="flyer-candidate-list" class="flyer-candidate-list"></ul>
+        </section>
+
+        <div class="flyer-actions">
+          <button type="button" id="flyer-add-btn" class="flyer-add-btn" disabled>
+            選択したものを追加
+          </button>
+          <button type="button" id="flyer-cancel-btn" class="flyer-cancel-btn">
+            閉じる
+          </button>
+        </div>
+      </div>
+    </dialog>
 
     <dialog id="settings-dialog" class="settings-dialog">
       <form method="dialog" id="settings-form" class="settings-panel">

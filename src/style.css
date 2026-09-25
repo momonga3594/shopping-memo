@@ -367,7 +367,7 @@ body {
   background: var(--surface);
   box-shadow: var(--composer-shadow);
   border-top: 1px solid var(--border);
-  padding: 10px 16px calc(12px + var(--safe-bottom));
+  padding: 10px 16px 12px;
   z-index: 20;
 }
 
@@ -739,7 +739,7 @@ body {
 
   .composer {
     padding-top: 6px;
-    padding-bottom: calc(8px + var(--safe-bottom));
+    padding-bottom: 8px;
   }
 
   .item-input {
@@ -747,70 +747,120 @@ body {
   }
 }
 
-/* ---- Flyer button ---- */
-.secondary-actions {
-  margin-top: 0;
+/* ---- Header subtitle (flyer tab) ---- */
+.flyer-subtitle {
+  margin: 8px 0 0;
+  font-size: 0.85rem;
+  color: var(--muted);
+  line-height: 1.5;
 }
 
-.flyer-btn {
+.flyer-subtitle[hidden] {
+  display: none;
+}
+
+.list-toolbar[hidden] {
+  display: none;
+}
+
+/* ---- Tab panels shell ---- */
+.panels {
   flex: 1;
-  min-height: var(--tap);
-  border: 2px solid var(--primary-light);
-  border-radius: 12px;
-  background: #fff;
-  color: var(--primary-dark);
-  font-size: 1rem;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  cursor: pointer;
-  transition: background 0.15s, transform 0.1s, opacity 0.15s;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  position: relative;
 }
 
-.flyer-btn:active {
-  background: #e8eee9;
-  transform: scale(0.98);
-}
-
-.flyer-btn:disabled,
-.flyer-btn.busy {
-  opacity: 0.65;
-  cursor: wait;
-}
-
-/* ---- Flyer dialog ---- */
-.flyer-dialog {
-  border: none;
-  padding: 0;
-  margin: 0;
-  max-width: none;
-  width: 100%;
-  max-height: min(92dvh, 720px);
-  border-radius: 20px 20px 0 0;
-  box-shadow: 0 -8px 40px rgba(0, 0, 0, 0.2);
-  inset: auto 0 0 0;
-  position: fixed;
-}
-
-.flyer-dialog[open] {
+.tab-panel {
+  flex: 1;
+  min-height: 0;
   display: flex;
   flex-direction: column;
 }
 
-.flyer-dialog::backdrop {
-  background: rgba(15, 23, 42, 0.5);
+.tab-panel[hidden] {
+  display: none;
 }
 
+.tab-panel-memo .main {
+  flex: 1;
+  min-height: 0;
+}
+
+.tab-panel-flyer {
+  overflow: hidden;
+}
+
+/* ---- Bottom tab bar ---- */
+.tab-bar {
+  flex-shrink: 0;
+  display: flex;
+  gap: 0;
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+  padding: 4px 8px calc(4px + var(--safe-bottom));
+  z-index: 30;
+  box-shadow: 0 -2px 12px rgba(27, 67, 50, 0.06);
+}
+
+.tab-btn {
+  flex: 1;
+  min-height: 52px;
+  border: none;
+  background: transparent;
+  border-radius: 12px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  color: var(--muted);
+  font-family: inherit;
+  padding: 6px 8px;
+  transition: background 0.15s, color 0.15s;
+}
+
+.tab-btn:active {
+  transform: scale(0.97);
+}
+
+.tab-btn.active {
+  color: var(--primary-dark);
+  background: #e8eee9;
+}
+
+.tab-btn:focus-visible {
+  outline: 2px solid var(--primary-light);
+  outline-offset: 2px;
+}
+
+.tab-icon {
+  font-size: 1.25rem;
+  line-height: 1;
+}
+
+.tab-label {
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+/* ---- Flyer panel (in-tab, not dialog) ---- */
 .flyer-panel {
+  flex: 1;
+  min-height: 0;
   margin: 0;
-  padding: 8px 16px calc(16px + var(--safe-bottom));
+  padding: 12px 16px 16px;
   display: flex;
   flex-direction: column;
   gap: 12px;
   width: 100%;
-  max-height: min(92dvh, 720px);
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
   overscroll-behavior: contain;
+  background: var(--bg);
 }
 
 .flyer-section {
@@ -915,13 +965,13 @@ body {
   border-radius: 12px;
   border: 1px solid var(--border);
   overflow: hidden;
-  max-height: 160px;
+  max-height: 180px;
 }
 
 .flyer-preview {
   display: block;
   max-width: 100%;
-  max-height: 160px;
+  max-height: 180px;
   object-fit: contain;
 }
 
@@ -984,10 +1034,11 @@ body {
   display: flex;
   gap: 10px;
   align-items: flex-start;
-  background: #f9fafb;
+  background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 12px;
   padding: 10px;
+  box-shadow: var(--shadow);
 }
 
 .flyer-candidate-check {
@@ -1044,11 +1095,11 @@ body {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  margin-top: 4px;
+  margin-top: auto;
+  padding-top: 8px;
   position: sticky;
   bottom: 0;
-  background: linear-gradient(to top, #fff 70%, rgba(255, 255, 255, 0.92));
-  padding-top: 8px;
+  background: linear-gradient(to top, var(--bg) 75%, rgba(246, 248, 245, 0.9));
 }
 
 .flyer-add-btn,
@@ -1086,21 +1137,11 @@ body {
 }
 
 @media (min-width: 560px) {
-  .flyer-dialog {
-    width: min(440px, calc(100% - 32px));
-    max-width: 440px;
-    margin: auto;
-    inset: 0;
-    border-radius: 16px;
-    max-height: min(88vh, 680px);
+  .tab-bar {
+    padding-bottom: 8px;
   }
 
   .flyer-panel {
-    max-height: min(88vh, 680px);
     padding: 16px 20px 20px;
-  }
-
-  .flyer-panel > .settings-handle {
-    display: none;
   }
 }

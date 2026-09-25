@@ -1,5 +1,6 @@
 const STORAGE_KEY = 'shopping-memo-items';
 const API_KEY_STORAGE = 'shopping-memo-gemini-key';
+const TAB_STORAGE_KEY = 'shopping-memo-active-tab';
 const UNSET_STORE_LABEL = '未設定';
 
 /** Primary + fallbacks if a model name is unavailable */
@@ -12,6 +13,14 @@ const GEMINI_MODELS = [
 /** @typedef {{ id: string, name: string, qty: string, store: string, done: boolean }} Item */
 
 const els = {
+  app: document.getElementById('app'),
+  appTitle: document.getElementById('app-title'),
+  listToolbar: document.getElementById('list-toolbar'),
+  flyerSubtitle: document.getElementById('flyer-subtitle'),
+  panelMemo: document.getElementById('panel-memo'),
+  panelFlyer: document.getElementById('panel-flyer'),
+  tabMemo: document.getElementById('tab-memo'),
+  tabFlyer: document.getElementById('tab-flyer'),
   form: document.getElementById('add-form'),
   input: document.getElementById('item-input'),
   qty: document.getElementById('qty-input'),
@@ -31,8 +40,6 @@ const els = {
   clearKeyBtn: document.getElementById('clear-key-btn'),
   settingsStatus: document.getElementById('settings-status'),
   aiBtn: document.getElementById('ai-organize-btn'),
-  flyerBtn: document.getElementById('flyer-btn'),
-  flyerDialog: document.getElementById('flyer-dialog'),
   flyerFileInput: document.getElementById('flyer-file-input'),
   flyerUrlInput: document.getElementById('flyer-url-input'),
   flyerUrlBtn: document.getElementById('flyer-url-btn'),
@@ -44,8 +51,7 @@ const els = {
   flyerSelectAll: document.getElementById('flyer-select-all'),
   flyerDeselectAll: document.getElementById('flyer-deselect-all'),
   flyerAddBtn: document.getElementById('flyer-add-btn'),
-  flyerCancelBtn: document.getElementById('flyer-cancel-btn'),
-  flyerCloseBtn: document.getElementById('flyer-close-btn'),
+  flyerClearBtn: document.getElementById('flyer-clear-btn'),
 };
 
 /** @type {Item[]} */
@@ -58,6 +64,60 @@ let flyerBusy = false;
 let flyerImagePayload = null;
 /** @type {string | null} */
 let flyerPreviewUrl = null;
+/** @type {'memo' | 'flyer'} */
+let activeTab = loadActiveTab();
+
+function loadActiveTab() {
+  try {
+    const v = localStorage.getItem(TAB_STORAGE_KEY);
+    return v === 'flyer' ? 'flyer' : 'memo';
+  } catch {
+    return 'memo';
+  }
+}
+
+function saveActiveTab(tab) {
+  try {
+    localStorage.setItem(TAB_STORAGE_KEY, tab);
+  } catch {
+    /* ignore */
+  }
+}
+
+/**
+ * @param {'memo' | 'flyer'} tab
+ */
+function setActiveTab(tab) {
+  if (tab !== 'memo' && tab !== 'flyer') tab = 'memo';
+  activeTab = tab;
+  saveActiveTab(tab);
+  els.app.dataset.tab = tab;
+
+  const isMemo = tab === 'memo';
+  els.panelMemo.hidden = !isMemo;
+  els.panelFlyer.hidden = isMemo;
+  els.listToolbar.hidden = !isMemo;
+  els.flyerSubtitle.hidden = isMemo;
+
+  els.appTitle.textContent = isMemo ? '買い物メモ' : 'チラシ';
+  document.title = isMemo ? '買い物メモ' : 'チラシ｜買い物メモ';
+
+  els.tabMemo.classList.toggle('active', isMemo);
+  els.tabFlyer.classList.toggle('active', !isMemo);
+  els.tabMemo.setAttribute('aria-selected', isMemo ? 'true' : 'false');
+  els.tabFlyer.setAttribute('aria-selected', isMemo ? 'false' : 'true');
+  els.tabMemo.tabIndex = isMemo ? 0 : -1;
+  els.tabFlyer.tabIndex = isMemo ? -1 : 0;
+
+  // Stop listening mic when leaving memo
+  if (!isMemo && listening && recognition) {
+    try {
+      recognition.stop();
+    } catch {
+      /* ignore */
+    }
+  }
+}
 
 function uid() {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
@@ -846,23 +906,12 @@ function clearFlyerReview() {
   els.flyerAddBtn.disabled = true;
 }
 
-function resetFlyerDialogState() {
+function resetFlyerPanelState() {
   clearFlyerPreview();
   clearFlyerReview();
   setFlyerStatus('');
   els.flyerFileInput.value = '';
   els.flyerUrlInput.value = '';
-}
-
-function openFlyerDialog() {
-  resetFlyerDialogState();
-  els.flyerDialog.showModal();
-}
-
-function closeFlyerDialog() {
-  if (flyerBusy) return;
-  els.flyerDialog.close();
-  resetFlyerDialogState();
 }
 
 /**
@@ -1080,10 +1129,11 @@ function updateFlyerAddButtonState() {
 
 function setFlyerBusy(busy) {
   flyerBusy = busy;
-  els.flyerBtn.disabled = busy;
-  els.flyerBtn.classList.toggle('busy', busy);
   els.flyerUrlBtn.disabled = busy;
   els.flyerFileInput.disabled = busy;
+  els.flyerClearBtn.disabled = busy;
+  els.tabMemo.disabled = busy;
+  els.tabFlyer.disabled = busy;
   els.flyerAddBtn.disabled = busy || els.flyerAddBtn.disabled;
   if (!busy) updateFlyerAddButtonState();
 }
@@ -1215,8 +1265,8 @@ function addSelectedFlyerItems() {
     return;
   }
   const count = addItemsFromAi(selected);
-  els.flyerDialog.close();
-  resetFlyerDialogState();
+  resetFlyerPanelState();
+  setActiveTab('memo');
   if (count === 0) {
     setStatus('すでに同じ内容がリストにあるため追加されませんでした', true);
   } else {
@@ -1224,31 +1274,71 @@ function addSelectedFlyerItems() {
   }
 }
 
-els.flyerBtn.addEventListener('click', () => {
-  if (flyerBusy) return;
-  const apiKey = getApiKey();
-  if (!apiKey) {
-    setStatus('APIキーが未設定です。設定を開いてください。', true);
-    openSettings();
+function onTabClick(tab) {
+  if (flyerBusy && tab !== activeTab) {
+    setFlyerStatus('解析中です。完了するまでお待ちください。', true);
     return;
   }
-  openFlyerDialog();
+  if (tab === 'flyer') {
+    const apiKey = getApiKey();
+    if (!apiKey) {
+      setStatus('APIキーが未設定です。設定を開いてください。', true);
+      openSettings();
+      // Still allow switching so user can see the tab after saving key
+    }
+  }
+  setActiveTab(tab);
+}
+
+els.tabMemo.addEventListener('click', () => onTabClick('memo'));
+els.tabFlyer.addEventListener('click', () => onTabClick('flyer'));
+
+els.tabMemo.addEventListener('keydown', (e) => {
+  if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
+    e.preventDefault();
+    onTabClick('flyer');
+    els.tabFlyer.focus();
+  }
+});
+els.tabFlyer.addEventListener('keydown', (e) => {
+  if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
+    e.preventDefault();
+    onTabClick('memo');
+    els.tabMemo.focus();
+  }
 });
 
 els.flyerFileInput.addEventListener('change', () => {
   const file = els.flyerFileInput.files?.[0];
   // Clear so the same file can be re-selected later
   els.flyerFileInput.value = '';
-  if (file) handleFlyerFile(file);
+  if (file) {
+    if (!getApiKey()) {
+      setFlyerStatus('APIキーが未設定です。設定を開いてください。', true);
+      openSettings();
+      return;
+    }
+    handleFlyerFile(file);
+  }
 });
 
 els.flyerUrlBtn.addEventListener('click', () => {
+  if (!getApiKey()) {
+    setFlyerStatus('APIキーが未設定です。設定を開いてください。', true);
+    openSettings();
+    return;
+  }
   handleFlyerUrl();
 });
 
 els.flyerUrlInput.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') {
     e.preventDefault();
+    if (!getApiKey()) {
+      setFlyerStatus('APIキーが未設定です。設定を開いてください。', true);
+      openSettings();
+      return;
+    }
     handleFlyerUrl();
   }
 });
@@ -1271,19 +1361,10 @@ els.flyerAddBtn.addEventListener('click', () => {
   addSelectedFlyerItems();
 });
 
-els.flyerCancelBtn.addEventListener('click', () => closeFlyerDialog());
-els.flyerCloseBtn.addEventListener('click', () => closeFlyerDialog());
-
-els.flyerDialog.addEventListener('click', (e) => {
-  if (e.target === els.flyerDialog) closeFlyerDialog();
-});
-
-els.flyerDialog.addEventListener('cancel', (e) => {
-  if (flyerBusy) {
-    e.preventDefault();
-  } else {
-    resetFlyerDialogState();
-  }
+els.flyerClearBtn.addEventListener('click', () => {
+  if (flyerBusy) return;
+  resetFlyerPanelState();
+  setFlyerStatus('クリアしました');
 });
 
 /* ---------- Voice ---------- */
@@ -1375,4 +1456,5 @@ function initVoice() {
 }
 
 initVoice();
+setActiveTab(activeTab);
 render();

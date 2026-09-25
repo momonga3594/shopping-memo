@@ -31,6 +31,21 @@ const els = {
   clearKeyBtn: document.getElementById('clear-key-btn'),
   settingsStatus: document.getElementById('settings-status'),
   aiBtn: document.getElementById('ai-organize-btn'),
+  flyerBtn: document.getElementById('flyer-btn'),
+  flyerDialog: document.getElementById('flyer-dialog'),
+  flyerFileInput: document.getElementById('flyer-file-input'),
+  flyerUrlInput: document.getElementById('flyer-url-input'),
+  flyerUrlBtn: document.getElementById('flyer-url-btn'),
+  flyerPreviewWrap: document.getElementById('flyer-preview-wrap'),
+  flyerPreview: document.getElementById('flyer-preview'),
+  flyerStatus: document.getElementById('flyer-status'),
+  flyerReview: document.getElementById('flyer-review'),
+  flyerCandidateList: document.getElementById('flyer-candidate-list'),
+  flyerSelectAll: document.getElementById('flyer-select-all'),
+  flyerDeselectAll: document.getElementById('flyer-deselect-all'),
+  flyerAddBtn: document.getElementById('flyer-add-btn'),
+  flyerCancelBtn: document.getElementById('flyer-cancel-btn'),
+  flyerCloseBtn: document.getElementById('flyer-close-btn'),
 };
 
 /** @type {Item[]} */
@@ -38,6 +53,11 @@ let items = loadItems();
 let recognition = null;
 let listening = false;
 let aiBusy = false;
+let flyerBusy = false;
+/** @type {{ mimeType: string, data: string } | null} */
+let flyerImagePayload = null;
+/** @type {string | null} */
+let flyerPreviewUrl = null;
 
 function uid() {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
@@ -704,6 +724,566 @@ async function organizeWithAi() {
 
 els.aiBtn.addEventListener('click', () => {
   organizeWithAi();
+});
+
+
+/* ---------- Flyer (チラシ) import ---------- */
+
+const FLYER_CORS_ERROR =
+  'このURLの画像を直接取得できませんでした。スクショか保存した画像を『写真・ギャラリー』から選んでください。';
+
+function setFlyerStatus(text, isError = false) {
+  els.flyerStatus.textContent = text;
+  els.flyerStatus.classList.toggle('error', isError);
+}
+
+function buildFlyerPrompt() {
+  return [
+    'あなたはスーパー・ドラッグストアなどのチラシ（広告チラシ）から買い物アイテムを抽出するアシスタントです。',
+    '画像に写っている特売・商品名だけを抽出してください。',
+    '商品でない広告文言・注意書き・クーポン条件・店の営業案内などは無視してください。',
+    '似た商品行はまとめてください。最大40件まで。',
+    '各要素:',
+    '- name: 必須。商品名（短い日本語）',
+    '- quantity: 数量・容量が読み取れる場合のみ短い日本語（例: "2パック", "500g"）。なければ空文字',
+    '- store: チラシ上に店名・チェーン名が読み取れる場合のみ。なければ空文字。推測しない',
+    '- price: 価格が読み取れる場合は短い文字列（例: "198円", "半額"）。なければ空文字。必須ではない',
+    '出力は JSON 配列のみ。形式: [{"name":"牛乳","quantity":"1本","store":"イオン","price":"198円"}]',
+    'アイテムが無い場合は [] 。説明文やコードフェンスは付けないでください。',
+  ].join('\n');
+}
+
+/**
+ * Resize/compress image Blob for Gemini inlineData.
+ * @param {Blob} blob
+ * @returns {Promise<{ mimeType: string, data: string, previewUrl: string }>}
+ */
+async function prepareImageForGemini(blob) {
+  if (!blob || !blob.type || !blob.type.startsWith('image/')) {
+    // Some cameras omit type; try decoding anyway
+    if (blob && (!blob.type || blob.type === 'application/octet-stream')) {
+      /* continue */
+    } else {
+      throw new Error('画像ファイルを選択してください。');
+    }
+  }
+
+  const objectUrl = URL.createObjectURL(blob);
+  try {
+    const img = await loadImage(objectUrl);
+    const maxEdge = 1600;
+    let { width, height } = img;
+    if (!width || !height) {
+      throw new Error('画像を読み込めませんでした。');
+    }
+    const scale = Math.min(1, maxEdge / Math.max(width, height));
+    const w = Math.max(1, Math.round(width * scale));
+    const h = Math.max(1, Math.round(height * scale));
+
+    const canvas = document.createElement('canvas');
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) throw new Error('画像の処理に失敗しました。');
+    ctx.drawImage(img, 0, 0, w, h);
+
+    const srcType = (blob.type || '').toLowerCase();
+    const preferPng = srcType.includes('png') && blob.size < 400_000 && scale === 1;
+    const mimeType = preferPng ? 'image/png' : 'image/jpeg';
+    const quality = preferPng ? undefined : 0.85;
+
+    const outBlob = await new Promise((resolve, reject) => {
+      canvas.toBlob(
+        (b) => (b ? resolve(b) : reject(new Error('画像の圧縮に失敗しました。'))),
+        mimeType,
+        quality,
+      );
+    });
+
+    const data = await blobToBase64Data(outBlob);
+    const previewUrl = URL.createObjectURL(outBlob);
+    return { mimeType, data, previewUrl };
+  } finally {
+    URL.revokeObjectURL(objectUrl);
+  }
+}
+
+function loadImage(src) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error('画像を読み込めませんでした。'));
+    img.src = src;
+  });
+}
+
+function blobToBase64Data(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = String(reader.result || '');
+      const comma = result.indexOf(',');
+      resolve(comma >= 0 ? result.slice(comma + 1) : result);
+    };
+    reader.onerror = () => reject(new Error('画像の読み込みに失敗しました。'));
+    reader.readAsDataURL(blob);
+  });
+}
+
+function clearFlyerPreview() {
+  if (flyerPreviewUrl) {
+    URL.revokeObjectURL(flyerPreviewUrl);
+    flyerPreviewUrl = null;
+  }
+  flyerImagePayload = null;
+  els.flyerPreview.removeAttribute('src');
+  els.flyerPreviewWrap.hidden = true;
+}
+
+function clearFlyerReview() {
+  els.flyerCandidateList.innerHTML = '';
+  els.flyerReview.hidden = true;
+  els.flyerAddBtn.disabled = true;
+}
+
+function resetFlyerDialogState() {
+  clearFlyerPreview();
+  clearFlyerReview();
+  setFlyerStatus('');
+  els.flyerFileInput.value = '';
+  els.flyerUrlInput.value = '';
+}
+
+function openFlyerDialog() {
+  resetFlyerDialogState();
+  els.flyerDialog.showModal();
+}
+
+function closeFlyerDialog() {
+  if (flyerBusy) return;
+  els.flyerDialog.close();
+  resetFlyerDialogState();
+}
+
+/**
+ * @param {string} apiKey
+ * @param {string} model
+ * @param {{ mimeType: string, data: string }} image
+ * @param {boolean} [withThinking]
+ */
+async function callGeminiVision(apiKey, model, image, withThinking = true) {
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
+    model,
+  )}:generateContent`;
+
+  /** @type {Record<string, unknown>} */
+  const generationConfig = {
+    responseMimeType: 'application/json',
+  };
+  if (withThinking) {
+    generationConfig.thinkingConfig = { thinkingLevel: 'low' };
+  }
+
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-goog-api-key': apiKey,
+    },
+    body: JSON.stringify({
+      contents: [
+        {
+          parts: [
+            { inlineData: { mimeType: image.mimeType, data: image.data } },
+            { text: buildFlyerPrompt() },
+          ],
+        },
+      ],
+      generationConfig,
+    }),
+  });
+
+  const bodyText = await res.text();
+  if (!res.ok) {
+    const mapped = mapGeminiError(res.status, bodyText);
+    const err = new Error(mapped || `HTTP ${res.status}`);
+    err.code = mapped === 'model_not_found' ? 'model_not_found' : 'http';
+    err.status = res.status;
+    err.body = bodyText;
+    if (!withThinking) err._retriedNoThinking = true;
+    throw err;
+  }
+
+  let data;
+  try {
+    data = JSON.parse(bodyText);
+  } catch {
+    const err = new Error('レスポンスの解析に失敗しました。');
+    err.code = 'parse';
+    throw err;
+  }
+
+  const textOut =
+    data?.candidates?.[0]?.content?.parts
+      ?.map((p) => p.text || '')
+      .join('') || '';
+
+  if (!textOut) {
+    const block = data?.promptFeedback?.blockReason;
+    const err = new Error(
+      block
+        ? `リクエストがブロックされました（${block}）。`
+        : 'AIから有効な応答がありませんでした。',
+    );
+    err.code = 'empty';
+    throw err;
+  }
+
+  return extractJsonArray(textOut);
+}
+
+async function callGeminiVisionWithFallback(apiKey, image) {
+  let lastError = null;
+  for (let i = 0; i < GEMINI_MODELS.length; i++) {
+    const model = GEMINI_MODELS[i];
+    try {
+      return await callGeminiVision(apiKey, model, image, true);
+    } catch (err) {
+      lastError = err;
+      const retry =
+        err.code === 'model_not_found' ||
+        err.status === 404 ||
+        (typeof err.body === 'string' &&
+          /not found|NOT_FOUND|unsupported/i.test(err.body));
+      if (retry && i < GEMINI_MODELS.length - 1) {
+        continue;
+      }
+      if (
+        typeof err.body === 'string' &&
+        /thinking/i.test(err.body) &&
+        !err._retriedNoThinking
+      ) {
+        try {
+          return await callGeminiVision(apiKey, model, image, false);
+        } catch (err2) {
+          lastError = err2;
+          if (i < GEMINI_MODELS.length - 1) continue;
+          throw err2;
+        }
+      }
+      throw err;
+    }
+  }
+  throw lastError || new Error('Gemini呼び出しに失敗しました。');
+}
+
+function normalizeFlyerCandidates(extracted) {
+  const fallbackStore = normalizeStore(els.store.value);
+  const out = [];
+  const seen = new Set();
+  for (const raw of extracted) {
+    if (!raw || typeof raw !== 'object') continue;
+    const name = String(raw.name || '').trim();
+    if (!name) continue;
+    let qty = String(raw.quantity ?? raw.qty ?? '').trim();
+    let store = normalizeStore(raw.store ?? raw.destination ?? '');
+    const price = String(raw.price || '').trim();
+    if (!store && fallbackStore) store = fallbackStore;
+    const key = `${name.toLowerCase()}|${qty}|${store}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ name, qty, store, price });
+    if (out.length >= 40) break;
+  }
+  return out;
+}
+
+function renderFlyerCandidates(candidates) {
+  els.flyerCandidateList.innerHTML = '';
+  if (!candidates.length) {
+    els.flyerReview.hidden = true;
+    els.flyerAddBtn.disabled = true;
+    return;
+  }
+  els.flyerReview.hidden = false;
+
+  for (const cand of candidates) {
+    const li = document.createElement('li');
+    li.className = 'flyer-candidate';
+
+    const check = document.createElement('input');
+    check.type = 'checkbox';
+    check.className = 'flyer-candidate-check';
+    check.checked = true;
+    check.setAttribute('aria-label', `${cand.name}を追加`);
+
+    const fields = document.createElement('div');
+    fields.className = 'flyer-candidate-fields';
+
+    const nameInput = document.createElement('input');
+    nameInput.type = 'text';
+    nameInput.className = 'flyer-cand-input flyer-cand-name';
+    nameInput.value = cand.name;
+    nameInput.maxLength = 80;
+    nameInput.setAttribute('aria-label', '商品名');
+    nameInput.placeholder = '商品名';
+
+    const meta = document.createElement('div');
+    meta.className = 'flyer-cand-meta';
+
+    const qtyInput = document.createElement('input');
+    qtyInput.type = 'text';
+    qtyInput.className = 'flyer-cand-input flyer-cand-qty';
+    qtyInput.value = cand.qty;
+    qtyInput.maxLength = 40;
+    qtyInput.placeholder = '数量';
+    qtyInput.setAttribute('aria-label', '数量');
+
+    const storeInput = document.createElement('input');
+    storeInput.type = 'text';
+    storeInput.className = 'flyer-cand-input flyer-cand-store';
+    storeInput.value = cand.store;
+    storeInput.maxLength = 40;
+    storeInput.placeholder = '購入先';
+    storeInput.setAttribute('list', 'store-suggestions');
+    storeInput.setAttribute('aria-label', '購入先');
+
+    meta.append(qtyInput, storeInput);
+    fields.append(nameInput, meta);
+
+    if (cand.price) {
+      const priceEl = document.createElement('p');
+      priceEl.className = 'flyer-cand-price';
+      priceEl.textContent = `参考価格: ${cand.price}`;
+      fields.appendChild(priceEl);
+    }
+
+    check.addEventListener('change', updateFlyerAddButtonState);
+    nameInput.addEventListener('input', updateFlyerAddButtonState);
+
+    li.append(check, fields);
+    els.flyerCandidateList.appendChild(li);
+  }
+
+  updateFlyerAddButtonState();
+}
+
+function updateFlyerAddButtonState() {
+  const rows = [...els.flyerCandidateList.querySelectorAll('.flyer-candidate')];
+  const any = rows.some((row) => {
+    const checked = row.querySelector('.flyer-candidate-check')?.checked;
+    const name = row.querySelector('.flyer-cand-name')?.value.trim();
+    return checked && name;
+  });
+  els.flyerAddBtn.disabled = !any || flyerBusy;
+}
+
+function setFlyerBusy(busy) {
+  flyerBusy = busy;
+  els.flyerBtn.disabled = busy;
+  els.flyerBtn.classList.toggle('busy', busy);
+  els.flyerUrlBtn.disabled = busy;
+  els.flyerFileInput.disabled = busy;
+  els.flyerAddBtn.disabled = busy || els.flyerAddBtn.disabled;
+  if (!busy) updateFlyerAddButtonState();
+}
+
+async function analyzeFlyerImage(prepared) {
+  const apiKey = getApiKey();
+  if (!apiKey) {
+    setFlyerStatus('APIキーが未設定です。設定を開いてください。', true);
+    openSettings();
+    return;
+  }
+
+  clearFlyerPreview();
+  clearFlyerReview();
+  flyerImagePayload = { mimeType: prepared.mimeType, data: prepared.data };
+  flyerPreviewUrl = prepared.previewUrl;
+  els.flyerPreview.src = prepared.previewUrl;
+  els.flyerPreviewWrap.hidden = false;
+
+  setFlyerBusy(true);
+  setFlyerStatus('チラシを解析しています…');
+
+  try {
+    const extracted = await callGeminiVisionWithFallback(apiKey, flyerImagePayload);
+    const candidates = normalizeFlyerCandidates(extracted);
+    if (!candidates.length) {
+      setFlyerStatus('商品が見つかりませんでした。別の画像を試してください。', true);
+      return;
+    }
+    renderFlyerCandidates(candidates);
+    setFlyerStatus(`${candidates.length} 件見つかりました。追加するものを選んでください`);
+  } catch (err) {
+    setFlyerStatus(friendlyAiError(err), true);
+  } finally {
+    setFlyerBusy(false);
+  }
+}
+
+async function handleFlyerFile(file) {
+  if (!file) return;
+  if (file.type && !file.type.startsWith('image/')) {
+    setFlyerStatus('画像ファイルを選択してください。', true);
+    return;
+  }
+  setFlyerBusy(true);
+  setFlyerStatus('画像を準備しています…');
+  clearFlyerReview();
+  try {
+    const prepared = await prepareImageForGemini(file);
+    await analyzeFlyerImage(prepared);
+  } catch (err) {
+    setFlyerStatus(err?.message || '画像の処理に失敗しました。', true);
+    setFlyerBusy(false);
+  }
+}
+
+async function handleFlyerUrl() {
+  const raw = els.flyerUrlInput.value.trim();
+  if (!raw) {
+    setFlyerStatus('画像のURLを入力してください。', true);
+    return;
+  }
+
+  let parsed;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    setFlyerStatus('URLの形式が正しくありません。', true);
+    return;
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    setFlyerStatus('http または https のURLを指定してください。', true);
+    return;
+  }
+
+  setFlyerBusy(true);
+  setFlyerStatus('URLから画像を取得しています…');
+  clearFlyerReview();
+
+  try {
+    let res;
+    try {
+      res = await fetch(parsed.href, { mode: 'cors' });
+    } catch {
+      throw new Error(FLYER_CORS_ERROR);
+    }
+    if (!res.ok) {
+      throw new Error(FLYER_CORS_ERROR);
+    }
+    const contentType = (res.headers.get('content-type') || '').toLowerCase();
+    if (contentType && !contentType.startsWith('image/') && !contentType.includes('octet-stream')) {
+      throw new Error('このURLは画像ではないようです。画像の直リンクを指定するか、写真から追加してください。');
+    }
+    const blob = await res.blob();
+    if (blob.type && !blob.type.startsWith('image/') && blob.type !== 'application/octet-stream') {
+      throw new Error('このURLは画像ではないようです。画像の直リンクを指定するか、写真から追加してください。');
+    }
+    const prepared = await prepareImageForGemini(blob);
+    await analyzeFlyerImage(prepared);
+  } catch (err) {
+    const msg =
+      err?.message === FLYER_CORS_ERROR
+        ? FLYER_CORS_ERROR
+        : err?.message || FLYER_CORS_ERROR;
+    setFlyerStatus(msg, true);
+    setFlyerBusy(false);
+  }
+}
+
+function collectCheckedFlyerItems() {
+  const rows = [...els.flyerCandidateList.querySelectorAll('.flyer-candidate')];
+  const result = [];
+  for (const row of rows) {
+    const checked = row.querySelector('.flyer-candidate-check')?.checked;
+    if (!checked) continue;
+    const name = row.querySelector('.flyer-cand-name')?.value.trim() || '';
+    if (!name) continue;
+    const qty = row.querySelector('.flyer-cand-qty')?.value.trim() || '';
+    const store = row.querySelector('.flyer-cand-store')?.value || '';
+    result.push({ name, quantity: qty, store });
+  }
+  return result;
+}
+
+function addSelectedFlyerItems() {
+  const selected = collectCheckedFlyerItems();
+  if (!selected.length) {
+    setFlyerStatus('追加するアイテムを選択してください。', true);
+    return;
+  }
+  const count = addItemsFromAi(selected);
+  els.flyerDialog.close();
+  resetFlyerDialogState();
+  if (count === 0) {
+    setStatus('すでに同じ内容がリストにあるため追加されませんでした', true);
+  } else {
+    setStatus(`チラシから ${count} 件をリストに追加しました`);
+  }
+}
+
+els.flyerBtn.addEventListener('click', () => {
+  if (flyerBusy) return;
+  const apiKey = getApiKey();
+  if (!apiKey) {
+    setStatus('APIキーが未設定です。設定を開いてください。', true);
+    openSettings();
+    return;
+  }
+  openFlyerDialog();
+});
+
+els.flyerFileInput.addEventListener('change', () => {
+  const file = els.flyerFileInput.files?.[0];
+  // Clear so the same file can be re-selected later
+  els.flyerFileInput.value = '';
+  if (file) handleFlyerFile(file);
+});
+
+els.flyerUrlBtn.addEventListener('click', () => {
+  handleFlyerUrl();
+});
+
+els.flyerUrlInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    handleFlyerUrl();
+  }
+});
+
+els.flyerSelectAll.addEventListener('click', () => {
+  for (const cb of els.flyerCandidateList.querySelectorAll('.flyer-candidate-check')) {
+    cb.checked = true;
+  }
+  updateFlyerAddButtonState();
+});
+
+els.flyerDeselectAll.addEventListener('click', () => {
+  for (const cb of els.flyerCandidateList.querySelectorAll('.flyer-candidate-check')) {
+    cb.checked = false;
+  }
+  updateFlyerAddButtonState();
+});
+
+els.flyerAddBtn.addEventListener('click', () => {
+  addSelectedFlyerItems();
+});
+
+els.flyerCancelBtn.addEventListener('click', () => closeFlyerDialog());
+els.flyerCloseBtn.addEventListener('click', () => closeFlyerDialog());
+
+els.flyerDialog.addEventListener('click', (e) => {
+  if (e.target === els.flyerDialog) closeFlyerDialog();
+});
+
+els.flyerDialog.addEventListener('cancel', (e) => {
+  if (flyerBusy) {
+    e.preventDefault();
+  } else {
+    resetFlyerDialogState();
+  }
 });
 
 /* ---------- Voice ---------- */

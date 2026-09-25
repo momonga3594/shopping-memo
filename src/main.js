@@ -1,5 +1,7 @@
 const STORAGE_KEY = 'shopping-memo-items';
 const API_KEY_STORAGE = 'shopping-memo-gemini-key';
+const FLYER_PROXY_STORAGE = 'shopping-memo-flyer-proxy';
+const FLYER_PROXY_SECRET_STORAGE = 'shopping-memo-flyer-proxy-secret';
 const TAB_STORAGE_KEY = 'shopping-memo-active-tab';
 const UNSET_STORE_LABEL = '未設定';
 
@@ -36,6 +38,8 @@ const els = {
   settingsBtn: document.getElementById('settings-btn'),
   settingsDialog: document.getElementById('settings-dialog'),
   apiKeyInput: document.getElementById('api-key-input'),
+  proxyUrlInput: document.getElementById('proxy-url-input'),
+  proxySecretInput: document.getElementById('proxy-secret-input'),
   saveKeyBtn: document.getElementById('save-key-btn'),
   clearKeyBtn: document.getElementById('clear-key-btn'),
   settingsStatus: document.getElementById('settings-status'),
@@ -167,6 +171,40 @@ function setApiKey(key) {
     localStorage.setItem(API_KEY_STORAGE, trimmed);
   } else {
     localStorage.removeItem(API_KEY_STORAGE);
+  }
+}
+
+function getFlyerProxyUrl() {
+  try {
+    return (localStorage.getItem(FLYER_PROXY_STORAGE) || '').trim().replace(/\/$/, '');
+  } catch {
+    return '';
+  }
+}
+
+function setFlyerProxyUrl(url) {
+  const trimmed = (url || '').trim().replace(/\/$/, '');
+  if (trimmed) {
+    localStorage.setItem(FLYER_PROXY_STORAGE, trimmed);
+  } else {
+    localStorage.removeItem(FLYER_PROXY_STORAGE);
+  }
+}
+
+function getFlyerProxySecret() {
+  try {
+    return (localStorage.getItem(FLYER_PROXY_SECRET_STORAGE) || '').trim();
+  } catch {
+    return '';
+  }
+}
+
+function setFlyerProxySecret(secret) {
+  const trimmed = (secret || '').trim();
+  if (trimmed) {
+    localStorage.setItem(FLYER_PROXY_SECRET_STORAGE, trimmed);
+  } else {
+    localStorage.removeItem(FLYER_PROXY_SECRET_STORAGE);
   }
 }
 
@@ -481,9 +519,12 @@ els.clearDone.addEventListener('click', () => {
 
 function openSettings() {
   els.apiKeyInput.value = getApiKey();
-  setSettingsStatus(
-    getApiKey() ? 'APIキーが保存されています' : 'APIキー未設定',
-  );
+  els.proxyUrlInput.value = getFlyerProxyUrl();
+  els.proxySecretInput.value = getFlyerProxySecret();
+  const parts = [];
+  parts.push(getApiKey() ? 'APIキー設定済' : 'APIキー未設定');
+  parts.push(getFlyerProxyUrl() ? 'プロキシ設定済' : 'プロキシ未設定');
+  setSettingsStatus(parts.join(' / '));
   els.settingsDialog.showModal();
   els.apiKeyInput.focus();
 }
@@ -492,18 +533,49 @@ els.settingsBtn.addEventListener('click', openSettings);
 
 els.saveKeyBtn.addEventListener('click', () => {
   const key = els.apiKeyInput.value.trim();
-  if (!key) {
-    setSettingsStatus('APIキーを入力してください', true);
+  const proxyRaw = els.proxyUrlInput.value.trim();
+  const proxySecret = els.proxySecretInput.value.trim();
+
+  if (proxyRaw) {
+    let proxyUrl;
+    try {
+      proxyUrl = new URL(proxyRaw);
+    } catch {
+      setSettingsStatus('プロキシURLの形式が正しくありません', true);
+      return;
+    }
+    if (proxyUrl.protocol !== 'http:' && proxyUrl.protocol !== 'https:') {
+      setSettingsStatus('プロキシURLは http または https にしてください', true);
+      return;
+    }
+  }
+
+  // Persist whatever is currently in the form (empty clears that field)
+  if (key) {
+    setApiKey(key);
+  }
+  setFlyerProxyUrl(proxyRaw);
+  setFlyerProxySecret(proxySecret);
+
+  if (!getApiKey() && !getFlyerProxyUrl()) {
+    setSettingsStatus('APIキーまたはプロキシURLを入力して保存してください', true);
     return;
   }
-  setApiKey(key);
-  setSettingsStatus('保存しました（このブラウザのみ）');
+
+  const parts = [];
+  parts.push(getApiKey() ? 'APIキー保存済' : 'APIキー未設定');
+  parts.push(getFlyerProxyUrl() ? 'プロキシ保存済' : 'プロキシ未設定');
+  setSettingsStatus(parts.join(' / '));
 });
 
 els.clearKeyBtn.addEventListener('click', () => {
   setApiKey('');
+  setFlyerProxyUrl('');
+  setFlyerProxySecret('');
   els.apiKeyInput.value = '';
-  setSettingsStatus('APIキーを削除しました');
+  els.proxyUrlInput.value = '';
+  els.proxySecretInput.value = '';
+  setSettingsStatus('APIキーとプロキシ設定を削除しました');
 });
 
 els.settingsDialog.addEventListener('click', (e) => {
@@ -1190,6 +1262,114 @@ async function handleFlyerFile(file) {
   }
 }
 
+/**
+ * Fetch an image blob either via configured Cloudflare Worker proxy
+ * or direct browser fetch (CORS-limited).
+ * @param {string} imageUrl
+ * @returns {Promise<Blob>}
+ */
+async function fetchFlyerImageBlob(imageUrl) {
+  const proxyBase = getFlyerProxyUrl();
+  if (proxyBase) {
+    let proxyEndpoint;
+    try {
+      const u = new URL(proxyBase);
+      const path = u.pathname.replace(/\/$/, '') || '';
+      proxyEndpoint = `${u.origin}${path}/?url=${encodeURIComponent(imageUrl)}`;
+    } catch {
+      throw new Error('設定のプロキシURLが不正です。設定を確認してください。');
+    }
+
+    const headers = {};
+    const secret = getFlyerProxySecret();
+    if (secret) headers['X-Proxy-Secret'] = secret;
+
+    let res;
+    try {
+      res = await fetch(proxyEndpoint, { method: 'GET', mode: 'cors', headers });
+    } catch {
+      throw new Error(
+        'プロキシ経由で画像を取得できませんでした。プロキシURL・ネットワークを確認するか、写真から追加してください。',
+      );
+    }
+
+    const contentType = (res.headers.get('content-type') || '').toLowerCase();
+    if (!res.ok) {
+      let detail = '';
+      if (contentType.includes('application/json')) {
+        try {
+          const j = await res.json();
+          detail = j.message || j.error || '';
+        } catch {
+          /* ignore */
+        }
+      }
+      if (res.status === 401) {
+        throw new Error(
+          'プロキシ認証に失敗しました。設定のシークレットを確認してください。',
+        );
+      }
+      throw new Error(
+        detail ||
+          `プロキシが画像を取得できませんでした（HTTP ${res.status}）。写真から追加してください。`,
+      );
+    }
+
+    if (
+      contentType &&
+      !contentType.startsWith('image/') &&
+      !contentType.includes('octet-stream')
+    ) {
+      throw new Error(
+        'プロキシの応答が画像ではありません。画像の直リンクを指定してください。',
+      );
+    }
+    const blob = await res.blob();
+    if (
+      blob.type &&
+      !blob.type.startsWith('image/') &&
+      blob.type !== 'application/octet-stream'
+    ) {
+      throw new Error(
+        'プロキシの応答が画像ではありません。画像の直リンクを指定してください。',
+      );
+    }
+    return blob;
+  }
+
+  // Direct fetch (often blocked by CORS)
+  let res;
+  try {
+    res = await fetch(imageUrl, { mode: 'cors' });
+  } catch {
+    throw new Error(FLYER_CORS_ERROR);
+  }
+  if (!res.ok) {
+    throw new Error(FLYER_CORS_ERROR);
+  }
+  const contentType = (res.headers.get('content-type') || '').toLowerCase();
+  if (
+    contentType &&
+    !contentType.startsWith('image/') &&
+    !contentType.includes('octet-stream')
+  ) {
+    throw new Error(
+      'このURLは画像ではないようです。画像の直リンクを指定するか、写真から追加してください。',
+    );
+  }
+  const blob = await res.blob();
+  if (
+    blob.type &&
+    !blob.type.startsWith('image/') &&
+    blob.type !== 'application/octet-stream'
+  ) {
+    throw new Error(
+      'このURLは画像ではないようです。画像の直リンクを指定するか、写真から追加してください。',
+    );
+  }
+  return blob;
+}
+
 async function handleFlyerUrl() {
   const raw = els.flyerUrlInput.value.trim();
   if (!raw) {
@@ -1209,28 +1389,15 @@ async function handleFlyerUrl() {
     return;
   }
 
+  const viaProxy = Boolean(getFlyerProxyUrl());
   setFlyerBusy(true);
-  setFlyerStatus('URLから画像を取得しています…');
+  setFlyerStatus(
+    viaProxy ? 'プロキシ経由で画像を取得しています…' : 'URLから画像を取得しています…',
+  );
   clearFlyerReview();
 
   try {
-    let res;
-    try {
-      res = await fetch(parsed.href, { mode: 'cors' });
-    } catch {
-      throw new Error(FLYER_CORS_ERROR);
-    }
-    if (!res.ok) {
-      throw new Error(FLYER_CORS_ERROR);
-    }
-    const contentType = (res.headers.get('content-type') || '').toLowerCase();
-    if (contentType && !contentType.startsWith('image/') && !contentType.includes('octet-stream')) {
-      throw new Error('このURLは画像ではないようです。画像の直リンクを指定するか、写真から追加してください。');
-    }
-    const blob = await res.blob();
-    if (blob.type && !blob.type.startsWith('image/') && blob.type !== 'application/octet-stream') {
-      throw new Error('このURLは画像ではないようです。画像の直リンクを指定するか、写真から追加してください。');
-    }
+    const blob = await fetchFlyerImageBlob(parsed.href);
     const prepared = await prepareImageForGemini(blob);
     await analyzeFlyerImage(prepared);
   } catch (err) {

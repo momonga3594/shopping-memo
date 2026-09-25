@@ -157,7 +157,7 @@
               </div>
 
               <p class="flyer-help">
-                ネットのチラシはURLが取れないことが多いです。その場合はスクショ／保存して写真から追加してください。
+                ネットのチラシはURLが取れないことが多いです。設定で画像プロキシURLを保存すると取得しやすくなります。取れない場合はスクショ／保存して写真から追加してください。
               </p>
 
               <div id="flyer-preview-wrap" class="flyer-preview-wrap" hidden>
@@ -257,6 +257,33 @@
           で取得できます。このブラウザの localStorage
           にだけ保存され、サーバーには送られません。
         </p>
+
+        <label for="proxy-url-input" class="settings-label">チラシ画像プロキシ URL（任意）</label>
+        <input
+          id="proxy-url-input"
+          type="url"
+          class="api-key-input proxy-url-input"
+          placeholder="https://….workers.dev"
+          inputmode="url"
+          autocomplete="off"
+          spellcheck="false"
+        />
+        <label for="proxy-secret-input" class="settings-label">プロキシ用シークレット（任意）</label>
+        <input
+          id="proxy-secret-input"
+          type="password"
+          class="api-key-input"
+          placeholder="Worker の PROXY_SECRET（設定時のみ）"
+          autocomplete="off"
+          spellcheck="false"
+        />
+        <p class="settings-help">
+          CORS で直接取れない画像URL向けです。自分で Cloudflare Worker
+          をデプロイし、そのベースURLを保存してください。手順はリポジトリの
+          <code>workers/flyer-proxy/README.md</code>
+          を参照。未設定のときはブラウザ直接取得（失敗しやすい）にフォールバックします。
+        </p>
+
         <div class="settings-actions">
           <button type="button" id="save-key-btn" class="save-key-btn">保存</button>
           <button type="button" id="clear-key-btn" class="clear-key-btn">クリア</button>

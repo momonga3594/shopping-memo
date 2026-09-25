@@ -46,6 +46,17 @@
 
 多くのネットチラシは画像の直URLを取れない（または CORS でブラウザから取得できない）ため、その場合はスクショや保存した画像を「写真・ギャラリー」から選んでください。
 
+### チラシ画像プロキシ（任意・推奨）
+
+CORS で直接取得できない画像URL向けに、Cloudflare Worker の小さなプロキシを同梱しています（`workers/flyer-proxy/`）。
+
+1. `workers/flyer-proxy` で `npx wrangler deploy`（手順は同ディレクトリの README）
+2. アプリの設定に Worker のベース URL（例: `https://shopping-memo-flyer-proxy.<subdomain>.workers.dev`）を保存
+3. 任意で Worker の `PROXY_SECRET` と同じ値を「プロキシ用シークレット」に保存
+
+プロキシ未設定時は従来どおりブラウザ直接取得にフォールバックします（失敗しやすいです）。  
+**公開の第三者 CORS プロキシは使わないでください。** このリポジトリの Worker を自分のアカウントにデプロイする想定です。デフォルトの workers.dev URL は同梱していません（各自のデプロイが必要です）。
+
 ### セキュリティ上の注意（クライアント側 API キー）
 
 このアプリは GitHub Pages の静的サイトのため、Gemini API を **ブラウザから直接** 呼び出します。API キーは端末にアクセスできる人なら DevTools 等で見られる可能性があります。可能であれば Google AI Studio 側でキーの利用制限（HTTP リファラ制限など）を設定してください。共有端末では使い終わったら設定から「クリア」してください。
@@ -88,6 +99,7 @@ npm run preview
 - Vite
 - バニラ HTML / CSS / JavaScript（依存は Vite のみ）
 - Google Gemini API（`generativelanguage.googleapis.com`、ブラウザから REST 呼び出し）
+- 任意: Cloudflare Worker（チラシ画像取得プロキシ、`workers/flyer-proxy`）
 
 ## ライセンス
 

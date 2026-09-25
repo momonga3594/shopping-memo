@@ -22,3 +22,8 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Cloudflare / wrangler
+.wrangler
+.dev.vars
+workers/**/node_modules

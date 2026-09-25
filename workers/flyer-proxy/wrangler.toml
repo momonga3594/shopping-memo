@@ -1,0 +1,9 @@
+name = "shopping-memo-flyer-proxy"
+main = "src/index.js"
+compatibility_date = "2026-09-01"
+
+# Optional shared secret. Set with:
+#   npx wrangler secret put PROXY_SECRET
+# Then the app must send header: X-Proxy-Secret: <value>
+# [vars]
+# ALLOWED_ORIGINS = "https://momonga3594.github.io,http://localhost:5173,http://127.0.0.1:5173"

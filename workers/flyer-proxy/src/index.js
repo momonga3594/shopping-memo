@@ -238,6 +238,8 @@ async function resolveAndCheckHost(hostname) {
     throw proxyError(502, 'dns_failed', 'ホスト名を解決できませんでした。');
   }
   for (const addr of names) {
+    // Skip non-IP strings defensively (e.g. unexpected DoH data).
+    if (!isIpLiteral(addr)) continue;
     if (isBlockedIp(addr)) {
       throw proxyError(
         403,
@@ -250,6 +252,9 @@ async function resolveAndCheckHost(hostname) {
 
 async function resolveDns(hostname) {
   const results = [];
+  // DoH may include CNAME (type 5) in the Answer section alongside A/AAAA.
+  // Only treat actual address records as IPs; CNAME hostnames are not IPs.
+  const wantType = { A: 1, AAAA: 28 };
   for (const type of ['A', 'AAAA']) {
     const doh = `https://cloudflare-dns.com/dns-query?name=${encodeURIComponent(hostname)}&type=${type}`;
     try {
@@ -259,6 +264,7 @@ async function resolveDns(hostname) {
       if (!res.ok) continue;
       const data = await res.json();
       for (const ans of data.Answer || []) {
+        if (ans.type !== wantType[type]) continue;
         if (typeof ans.data === 'string') results.push(ans.data);
       }
     } catch {

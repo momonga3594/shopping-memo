@@ -1211,19 +1211,20 @@ function setFlyerBusy(busy) {
 }
 
 async function analyzeFlyerImage(prepared) {
-  const apiKey = getApiKey();
-  if (!apiKey) {
-    setFlyerStatus('APIキーが未設定です。設定を開いてください。', true);
-    openSettings();
-    return;
-  }
-
   clearFlyerPreview();
   clearFlyerReview();
   flyerImagePayload = { mimeType: prepared.mimeType, data: prepared.data };
   flyerPreviewUrl = prepared.previewUrl;
   els.flyerPreview.src = prepared.previewUrl;
   els.flyerPreviewWrap.hidden = false;
+
+  const apiKey = getApiKey();
+  if (!apiKey) {
+    setFlyerStatus('画像は取得できました。APIキーが未設定です。設定を開いてください。', true);
+    openSettings();
+    setFlyerBusy(false);
+    return;
+  }
 
   setFlyerBusy(true);
   setFlyerStatus('チラシを解析しています…');

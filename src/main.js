@@ -49,6 +49,8 @@ const els = {
   flyerUrlBtn: document.getElementById('flyer-url-btn'),
   flyerPreviewWrap: document.getElementById('flyer-preview-wrap'),
   flyerPreview: document.getElementById('flyer-preview'),
+  flyerPagePicker: document.getElementById('flyer-page-picker'),
+  flyerPageList: document.getElementById('flyer-page-list'),
   flyerStatus: document.getElementById('flyer-status'),
   flyerReview: document.getElementById('flyer-review'),
   flyerCandidateList: document.getElementById('flyer-candidate-list'),
@@ -972,6 +974,23 @@ function clearFlyerPreview() {
   els.flyerPreviewWrap.hidden = true;
 }
 
+function clearFlyerPagePicker() {
+  if (!els.flyerPageList) return;
+  // Revoke any thumb object URLs stored on buttons
+  for (const btn of els.flyerPageList.querySelectorAll('.flyer-page-btn')) {
+    const thumbUrl = btn.dataset.thumbObjectUrl;
+    if (thumbUrl) {
+      try {
+        URL.revokeObjectURL(thumbUrl);
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+  els.flyerPageList.innerHTML = '';
+  if (els.flyerPagePicker) els.flyerPagePicker.hidden = true;
+}
+
 function clearFlyerReview() {
   els.flyerCandidateList.innerHTML = '';
   els.flyerReview.hidden = true;
@@ -980,6 +999,7 @@ function clearFlyerReview() {
 
 function resetFlyerPanelState() {
   clearFlyerPreview();
+  clearFlyerPagePicker();
   clearFlyerReview();
   setFlyerStatus('');
   els.flyerFileInput.value = '';
@@ -1207,6 +1227,11 @@ function setFlyerBusy(busy) {
   els.tabMemo.disabled = busy;
   els.tabFlyer.disabled = busy;
   els.flyerAddBtn.disabled = busy || els.flyerAddBtn.disabled;
+  if (els.flyerPageList) {
+    for (const btn of els.flyerPageList.querySelectorAll('.flyer-page-btn')) {
+      btn.disabled = busy;
+    }
+  }
   if (!busy) updateFlyerAddButtonState();
 }
 
@@ -1253,6 +1278,7 @@ async function handleFlyerFile(file) {
   }
   setFlyerBusy(true);
   setFlyerStatus('画像を準備しています…');
+  clearFlyerPagePicker();
   clearFlyerReview();
   try {
     const prepared = await prepareImageForGemini(file);
@@ -1261,6 +1287,58 @@ async function handleFlyerFile(file) {
     setFlyerStatus(err?.message || '画像の処理に失敗しました。', true);
     setFlyerBusy(false);
   }
+}
+
+/**
+ * Build Worker endpoint for image fetch (?url=) or viewer resolve (?resolve=).
+ * @param {'url' | 'resolve'} mode
+ * @param {string} target
+ * @returns {string}
+ */
+function buildFlyerProxyEndpoint(mode, target) {
+  const proxyBase = getFlyerProxyUrl();
+  if (!proxyBase) {
+    throw new Error(
+      'ビューアURLの解析にはプロキシ設定が必要です。設定でチラシ画像プロキシURLを保存してください。',
+    );
+  }
+  let u;
+  try {
+    u = new URL(proxyBase);
+  } catch {
+    throw new Error('設定のプロキシURLが不正です。設定を確認してください。');
+  }
+  const path = u.pathname.replace(/\/$/, '') || '';
+  const param = mode === 'resolve' ? 'resolve' : 'url';
+  return `${u.origin}${path}/?${param}=${encodeURIComponent(target)}`;
+}
+
+function proxyRequestHeaders() {
+  /** @type {Record<string, string>} */
+  const headers = {};
+  const secret = getFlyerProxySecret();
+  if (secret) headers['X-Proxy-Secret'] = secret;
+  return headers;
+}
+
+/**
+ * @param {URL} parsed
+ */
+function isDirectImageUrl(parsed) {
+  return /\.(jpe?g|png|gif|webp|bmp|avif|heic)(\?|#|$)/i.test(parsed.pathname);
+}
+
+/**
+ * Aeon chirashi viewer: host + /viewer/ + s_id + f_id
+ * @param {URL} parsed
+ */
+function isAeonViewerUrl(parsed) {
+  const host = parsed.hostname.toLowerCase();
+  if (host !== 'chirashi.otoku.aeonsquare.net') return false;
+  if (!parsed.pathname.includes('/viewer/')) return false;
+  const sId = parsed.searchParams.get('s_id');
+  const fId = parsed.searchParams.get('f_id');
+  return Boolean(sId && fId);
 }
 
 /**
@@ -1274,16 +1352,12 @@ async function fetchFlyerImageBlob(imageUrl) {
   if (proxyBase) {
     let proxyEndpoint;
     try {
-      const u = new URL(proxyBase);
-      const path = u.pathname.replace(/\/$/, '') || '';
-      proxyEndpoint = `${u.origin}${path}/?url=${encodeURIComponent(imageUrl)}`;
-    } catch {
-      throw new Error('設定のプロキシURLが不正です。設定を確認してください。');
+      proxyEndpoint = buildFlyerProxyEndpoint('url', imageUrl);
+    } catch (err) {
+      throw new Error(err?.message || '設定のプロキシURLが不正です。設定を確認してください。');
     }
 
-    const headers = {};
-    const secret = getFlyerProxySecret();
-    if (secret) headers['X-Proxy-Secret'] = secret;
+    const headers = proxyRequestHeaders();
 
     let res;
     try {
@@ -1371,10 +1445,191 @@ async function fetchFlyerImageBlob(imageUrl) {
   return blob;
 }
 
+/**
+ * Ask Worker to resolve a flyer viewer URL into image list.
+ * @param {string} viewerUrl
+ * @returns {Promise<{ source: string, title?: string, images: { url: string, thumbUrl?: string, label?: string }[] }>}
+ */
+async function resolveFlyerViewerViaProxy(viewerUrl) {
+  const endpoint = buildFlyerProxyEndpoint('resolve', viewerUrl);
+  const headers = proxyRequestHeaders();
+
+  let res;
+  try {
+    res = await fetch(endpoint, { method: 'GET', mode: 'cors', headers });
+  } catch {
+    throw new Error(
+      'ビューアの解析に失敗しました。プロキシURL・ネットワークを確認するか、写真から追加してください。',
+    );
+  }
+
+  const contentType = (res.headers.get('content-type') || '').toLowerCase();
+  let body = null;
+  if (contentType.includes('application/json')) {
+    try {
+      body = await res.json();
+    } catch {
+      body = null;
+    }
+  }
+
+  if (!res.ok) {
+    if (res.status === 401) {
+      throw new Error(
+        'プロキシ認証に失敗しました。設定のシークレットを確認してください。',
+      );
+    }
+    const detail =
+      (body && (body.message || body.error)) ||
+      `ビューアの解析に失敗しました（HTTP ${res.status}）。写真から追加してください。`;
+    throw new Error(String(detail));
+  }
+
+  if (!body || !Array.isArray(body.images) || !body.images.length) {
+    throw new Error(
+      'チラシ画像が見つかりませんでした。URLを確認するか、写真から追加してください。',
+    );
+  }
+  return body;
+}
+
+/**
+ * @param {string} imageUrl
+ */
+async function analyzeFlyerImageFromUrl(imageUrl) {
+  clearFlyerPagePicker();
+  const viaProxy = Boolean(getFlyerProxyUrl());
+  setFlyerBusy(true);
+  setFlyerStatus(
+    viaProxy ? 'プロキシ経由で画像を取得しています…' : 'URLから画像を取得しています…',
+  );
+  clearFlyerReview();
+  try {
+    const blob = await fetchFlyerImageBlob(imageUrl);
+    const prepared = await prepareImageForGemini(blob);
+    await analyzeFlyerImage(prepared);
+  } catch (err) {
+    const msg =
+      err?.message === FLYER_CORS_ERROR
+        ? FLYER_CORS_ERROR
+        : err?.message || FLYER_CORS_ERROR;
+    setFlyerStatus(msg, true);
+    setFlyerBusy(false);
+  }
+}
+
+/**
+ * @param {{ url: string, thumbUrl?: string, label?: string }[]} images
+ * @param {string} [title]
+ */
+function renderFlyerPagePicker(images, title) {
+  clearFlyerPagePicker();
+  if (!els.flyerPagePicker || !els.flyerPageList) return;
+
+  const titleEl = els.flyerPagePicker.querySelector('.flyer-page-picker-title');
+  if (titleEl) {
+    titleEl.textContent = title
+      ? `「${title}」のページを選んでください`
+      : 'ページを選んでください';
+  }
+
+  els.flyerPagePicker.hidden = false;
+
+  images.forEach((img, index) => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'flyer-page-btn';
+    btn.setAttribute('role', 'listitem');
+    const label = img.label || `${index + 1}枚目`;
+    btn.setAttribute('aria-label', label);
+
+    const labelEl = document.createElement('span');
+    labelEl.className = 'flyer-page-label';
+    labelEl.textContent = label;
+    btn.appendChild(labelEl);
+
+    btn.addEventListener('click', () => {
+      if (flyerBusy) return;
+      analyzeFlyerImageFromUrl(img.url);
+    });
+
+    els.flyerPageList.appendChild(btn);
+
+    // Optional thumb via proxy (supports secret header)
+    const thumbSrc = img.thumbUrl || img.url;
+    if (thumbSrc && getFlyerProxyUrl()) {
+      fetchFlyerImageBlob(thumbSrc)
+        .then((blob) => {
+          if (!btn.isConnected) return;
+          const objectUrl = URL.createObjectURL(blob);
+          btn.dataset.thumbObjectUrl = objectUrl;
+          const thumb = document.createElement('img');
+          thumb.className = 'flyer-page-thumb';
+          thumb.alt = '';
+          thumb.src = objectUrl;
+          btn.insertBefore(thumb, labelEl);
+        })
+        .catch(() => {
+          /* thumbs are optional */
+        });
+    }
+  });
+}
+
+/**
+ * @param {string} viewerHref
+ */
+async function handleAeonViewerUrl(viewerHref) {
+  if (!getFlyerProxyUrl()) {
+    setFlyerStatus(
+      'ビューアURLの解析にはプロキシ設定が必要です。設定でチラシ画像プロキシURLを保存するか、写真から追加してください。',
+      true,
+    );
+    openSettings();
+    return;
+  }
+
+  setFlyerBusy(true);
+  clearFlyerPagePicker();
+  clearFlyerReview();
+  clearFlyerPreview();
+  setFlyerStatus('ビューアからチラシ画像を探しています…');
+
+  try {
+    const resolved = await resolveFlyerViewerViaProxy(viewerHref);
+    const images = resolved.images.filter((x) => x && x.url);
+    if (!images.length) {
+      setFlyerStatus(
+        'チラシ画像が見つかりませんでした。URLを確認するか、写真から追加してください。',
+        true,
+      );
+      setFlyerBusy(false);
+      return;
+    }
+
+    setFlyerStatus(`${images.length}枚見つかりました`);
+
+    if (images.length === 1) {
+      await analyzeFlyerImageFromUrl(images[0].url);
+      return;
+    }
+
+    setFlyerBusy(false);
+    renderFlyerPagePicker(images, resolved.title || '');
+  } catch (err) {
+    setFlyerStatus(
+      err?.message ||
+        'ビューアの解析に失敗しました。写真から追加してください。',
+      true,
+    );
+    setFlyerBusy(false);
+  }
+}
+
 async function handleFlyerUrl() {
   const raw = els.flyerUrlInput.value.trim();
   if (!raw) {
-    setFlyerStatus('画像のURLを入力してください。', true);
+    setFlyerStatus('画像またはビューアのURLを入力してください。', true);
     return;
   }
 
@@ -1390,25 +1645,23 @@ async function handleFlyerUrl() {
     return;
   }
 
-  const viaProxy = Boolean(getFlyerProxyUrl());
-  setFlyerBusy(true);
-  setFlyerStatus(
-    viaProxy ? 'プロキシ経由で画像を取得しています…' : 'URLから画像を取得しています…',
-  );
-  clearFlyerReview();
-
-  try {
-    const blob = await fetchFlyerImageBlob(parsed.href);
-    const prepared = await prepareImageForGemini(blob);
-    await analyzeFlyerImage(prepared);
-  } catch (err) {
-    const msg =
-      err?.message === FLYER_CORS_ERROR
-        ? FLYER_CORS_ERROR
-        : err?.message || FLYER_CORS_ERROR;
-    setFlyerStatus(msg, true);
-    setFlyerBusy(false);
+  // Viewer URL takes priority over treating it as a (non-image) page
+  if (isAeonViewerUrl(parsed)) {
+    await handleAeonViewerUrl(parsed.href);
+    return;
   }
+
+  // Direct image URL (extension) or unknown URL → existing image fetch flow
+  const viaProxy = Boolean(getFlyerProxyUrl());
+  if (!isDirectImageUrl(parsed) && !viaProxy) {
+    setFlyerStatus(
+      '画像の直リンク、またはイオンのチラシビューアURLを指定してください。プロキシ未設定の場合は写真から追加もできます。',
+      true,
+    );
+    return;
+  }
+
+  await analyzeFlyerImageFromUrl(parsed.href);
 }
 
 function collectCheckedFlyerItems() {

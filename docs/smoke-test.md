@@ -19,11 +19,16 @@
 - [ ] **AIで整理**: 雑な文からアイテムが抽出されリストへ追加される
 - [ ] **チラシ（カメラ／ギャラリー）**: 写真から候補が出て、選択したものをメモへ追加できる
 - [ ] **チラシ（画像URL）**: 公開画像の直リンクで読み込める（プロキシ経由）
-- [ ] **チラシ（ビューア resolve・任意）**: イオン／ウオロク／クラシルの URL を貼ると画像一覧が出る  
-  例（イオン・店舗・チラシIDは実際のものに差し替え）:  
+- [ ] **チラシ（標準の店舗ボタン）**: 「ウオロク 神道寺」「イオン とやの店」「原信 黒崎」を押すと、URLを貼らずに画像一覧が出る
+- [ ] **チラシ（ビューア resolve・任意）**: イオン／ウオロク／クラシル／原信の URL を貼ると画像一覧が出る  
+  例（イオン店舗ページ）:  
+  `https://www.aeon.com/store/イオン/イオンとやの店/`  
+  例（イオンビューア・店舗・チラシIDは実際のものに差し替え）:  
   `https://chirashi.otoku.aeonsquare.net/viewer/index.html?d=sp&s_id=0000021780&f_id=f176358`  
   例（ウオロク店舗ページ）:  
   `https://www.uoroku.co.jp/shop/flyer/kandoji.html`  
+  例（原信店舗ページ）:  
+  `https://www.harashinnarus.jp/shops/kurosaki/`  
   例（クラシルウィジェット）:  
   `https://chirashi.kurashiru.com/widgets/3fca60ae-f69f-4001-9160-075b98b1a565/leaflets`
 

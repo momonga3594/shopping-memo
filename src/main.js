@@ -5,6 +5,22 @@ const FLYER_PROXY_SECRET_STORAGE = 'shopping-memo-flyer-proxy-secret';
 const TAB_STORAGE_KEY = 'shopping-memo-active-tab';
 const UNSET_STORE_LABEL = '未設定';
 
+/** Built-in store flyer pages (resolved by the flyer proxy). */
+const FLYER_PRESETS = [
+  {
+    id: 'uoroku-kandoji',
+    url: 'https://www.uoroku.co.jp/shop/flyer/kandoji.html',
+  },
+  {
+    id: 'aeon-toyano',
+    url: 'https://www.aeon.com/store/%E3%82%A4%E3%82%AA%E3%83%B3/%E3%82%A4%E3%82%AA%E3%83%B3%E3%81%A8%E3%82%84%E3%81%AE%E5%BA%97/?is_browser=true',
+  },
+  {
+    id: 'harashin-kurosaki',
+    url: 'https://www.harashinnarus.jp/shops/kurosaki/',
+  },
+];
+
 /** Primary + fallbacks if a model name is unavailable */
 const GEMINI_MODELS = [
   'gemini-3.8-flash',
@@ -1223,6 +1239,9 @@ function setFlyerBusy(busy) {
   flyerBusy = busy;
   els.flyerUrlBtn.disabled = busy;
   els.flyerFileInput.disabled = busy;
+  for (const btn of document.querySelectorAll('.flyer-preset-btn')) {
+    btn.disabled = busy;
+  }
   els.flyerClearBtn.disabled = busy;
   els.tabMemo.disabled = busy;
   els.tabFlyer.disabled = busy;
@@ -1352,6 +1371,26 @@ function isUorokuFlyerPageUrl(parsed) {
 }
 
 /**
+ * Aeon STORE page (www.aeon.com/store/...). Worker reads data-flyer-id.
+ * @param {URL} parsed
+ */
+function isAeonStorePageUrl(parsed) {
+  const host = parsed.hostname.toLowerCase();
+  if (host !== 'www.aeon.com' && host !== 'aeon.com') return false;
+  return /^\/store\/[^/].+/i.test(parsed.pathname) && !parsed.pathname.includes('..');
+}
+
+/**
+ * Harashin shop page with embedded flyer images.
+ * @param {URL} parsed
+ */
+function isHarashinShopUrl(parsed) {
+  const host = parsed.hostname.toLowerCase();
+  if (host !== 'www.harashinnarus.jp' && host !== 'harashinnarus.jp') return false;
+  return /^\/shops\/[a-z0-9_-]+\/?$/i.test(parsed.pathname);
+}
+
+/**
  * Kurashiru chirashi widget or store page
  * @param {URL} parsed
  */
@@ -1370,8 +1409,10 @@ function isKurashiruWidgetOrStoreUrl(parsed) {
 function isResolvableFlyerViewerUrl(parsed) {
   return (
     isAeonViewerUrl(parsed) ||
+    isAeonStorePageUrl(parsed) ||
     isUorokuFlyerPageUrl(parsed) ||
-    isKurashiruWidgetOrStoreUrl(parsed)
+    isKurashiruWidgetOrStoreUrl(parsed) ||
+    isHarashinShopUrl(parsed)
   );
 }
 
@@ -1690,7 +1731,7 @@ async function handleFlyerUrl() {
   const viaProxy = Boolean(getFlyerProxyUrl());
   if (!isDirectImageUrl(parsed) && !viaProxy) {
     setFlyerStatus(
-      '画像の直リンク、またはイオン／ウオロク／クラシルのチラシURLを指定してください。プロキシ未設定の場合は写真から追加もできます。',
+      '画像の直リンク、またはイオン／ウオロク／クラシル／原信のチラシURLを指定してください。プロキシ未設定の場合は写真から追加もできます。',
       true,
     );
     return;
@@ -1786,6 +1827,21 @@ els.flyerUrlBtn.addEventListener('click', () => {
   }
   handleFlyerUrl();
 });
+
+for (const btn of document.querySelectorAll('.flyer-preset-btn')) {
+  btn.addEventListener('click', () => {
+    if (flyerBusy) return;
+    const preset = FLYER_PRESETS.find((p) => p.id === btn.dataset.flyerPreset);
+    if (!preset) return;
+    if (!getApiKey()) {
+      setFlyerStatus('APIキーが未設定です。設定を開いてください。', true);
+      openSettings();
+      return;
+    }
+    els.flyerUrlInput.value = preset.url;
+    handleFlyerUrl();
+  });
+}
 
 els.flyerUrlInput.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') {

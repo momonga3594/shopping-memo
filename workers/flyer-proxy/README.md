@@ -1,7 +1,7 @@
 # チラシ画像プロキシ（Cloudflare Worker）
 
 ブラウザから直接取得できない（CORS）チラシ画像URLを、サーバー側で取得して返す小さなプロキシです。  
-イオン／ウオロク／クラシルのチラシ**ビューア・店舗URL**から画像一覧を解決するモードもあります。  
+イオン／ウオロク／クラシル／原信のチラシ**ビューア・店舗URL**から画像一覧を解決するモードもあります。  
 **Gemini API キーは扱いません。** 画像バイトの中継とビューア解決のみです。
 
 ## デプロイ
@@ -37,7 +37,7 @@ npx wrangler secret put PROXY_SECRET
 チラシタブの「URLから読み込み」は、プロキシが設定されていれば  
 - 画像直リンク: `GET {proxy}/?url={encodeURIComponent(imageUrl)}`
 - ビューア／店舗 resolve: `GET {proxy}/?resolve={encodeURIComponent(viewerUrl)}`  
-  （イオン / ウオロク店舗チラシ / クラシルウィジェット・店舗）  
+  （イオン店舗・ビューア / ウオロク店舗チラシ / クラシル / 原信店舗）  
 経由で取得します。
 
 ## API
@@ -53,9 +53,11 @@ npx wrangler secret put PROXY_SECRET
 | 種別 | 例 |
 |------|----|
 | イオン ビューア | `https://chirashi.otoku.aeonsquare.net/viewer/index.html?...&s_id=...&f_id=...` |
+| イオン店舗ページ | `https://www.aeon.com/store/イオン/イオンとやの店/`（HTML の `data-flyer-id` を店舗IDにし、掲載中のチラシ画像を返す） |
 | ウオロク店舗チラシ | `https://www.uoroku.co.jp/shop/flyer/kandoji.html`（ページ内のクラシル iframe を辿る） |
 | クラシルウィジェット | `https://chirashi.kurashiru.com/widgets/{uuid}/leaflets` |
 | クラシル店舗 | `https://chirashi.kurashiru.com/stores/{uuid}` または `/stores/{uuid}/limit_excursion?...` |
+| 原信店舗 | `https://www.harashinnarus.jp/shops/kurosaki/`（ページ内のチラシ JPEG を抽出。`source` は `harashin`） |
 
 成功例（イオン）:
 
@@ -128,7 +130,7 @@ npx wrangler secret put PROXY_SECRET
 - 応答サイズ上限 約 8MB（画像）／約 2MB（JSON）、タイムアウト約 15 秒
 - 画像: `Content-Type: image/*` またはマジックバイトで画像判定
 - resolve の JSON 取得（イオン）は allowlist ホスト＋`/viewer/json/{7桁}.json` のみ
-- resolve の HTML 取得は allowlist のみ: `www.uoroku.co.jp` / `uoroku.co.jp`（`/shop/flyer/`）、`chirashi.kurashiru.com`（`/widgets/{uuid}/leaflets` または `/stores/{uuid}`）
+- resolve の HTML 取得は allowlist のみ: `www.uoroku.co.jp` / `uoroku.co.jp`（`/shop/flyer/`）、`www.aeon.com` / `aeon.com`（`/store/…`）、`www.harashinnarus.jp` / `harashinnarus.jp`（`/shops/{slug}`）、`chirashi.kurashiru.com`（`/widgets/{uuid}/leaflets` または `/stores/{uuid}`）
 - クラシル画像は `thumbnail_` / `compressed_` を外したフル JPEG を `url` に、縮小版を `thumbUrl` に載せる
 - ブラウザ風 `User-Agent` を付与
 
@@ -139,4 +141,5 @@ npx wrangler dev
 curl -i "http://127.0.0.1:8787/?url=https%3A%2F%2Fhttpbin.org%2Fimage%2Fjpeg"
 curl -i "http://127.0.0.1:8787/?resolve=https%3A%2F%2Fchirashi.otoku.aeonsquare.net%2Fviewer%2Findex.html%3Fd%3Dsp%26s_id%3D0000021780%26f_id%3Df176358"
 curl -i "http://127.0.0.1:8787/?resolve=https%3A%2F%2Fwww.uoroku.co.jp%2Fshop%2Fflyer%2Fkandoji.html"
+curl -i "http://127.0.0.1:8787/?resolve=https%3A%2F%2Fwww.harashinnarus.jp%2Fshops%2Fkurosaki%2F"
 ```

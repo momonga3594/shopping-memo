@@ -1,7 +1,7 @@
 /**
  * shopping-memo flyer image proxy (Cloudflare Worker)
  * Fetches remote images server-side to bypass browser CORS.
- * Also resolves known flyer VIEWER / store pages (Aeon, Uoroku, Kurashiru) to image URL lists.
+ * Also resolves known flyer VIEWER / store pages (Aeon, Uoroku, Kurashiru, Harashin) to image URL lists.
  * No Gemini / API keys are handled here.
  */
 
@@ -31,6 +31,10 @@ const HTML_RESOLVE_HOSTS = new Set([
   'www.uoroku.co.jp',
   'uoroku.co.jp',
   'chirashi.kurashiru.com',
+  'www.aeon.com',
+  'aeon.com',
+  'www.harashinnarus.jp',
+  'harashinnarus.jp',
 ]);
 
 const KURASHIRU_UUID_RE =
@@ -335,11 +339,32 @@ async function resolveViewerUrl(rawViewerUrl) {
     }
   }
 
+  if ((host === 'www.aeon.com' || host === 'aeon.com') && isAeonStorePath(viewer.pathname)) {
+    return resolveAeonStorePage(viewer);
+  }
+
+  if (
+    (host === 'www.harashinnarus.jp' || host === 'harashinnarus.jp') &&
+    isHarashinShopPath(viewer.pathname)
+  ) {
+    return resolveHarashinShopPage(viewer);
+  }
+
   throw proxyError(
     400,
     'unsupported_viewer',
-    'このビューアURLには未対応です。イオン／ウオロク店舗チラシ／クラシルウィジェットのURL、または画像の直リンクを指定してください。',
+    'このビューアURLには未対応です。イオン店舗／チラシビューア、ウオロク店舗チラシ、クラシル、原信店舗のURL、または画像の直リンクを指定してください。',
   );
+}
+
+/** Aeon STORE page (www.aeon.com/store/...), not the chirashi viewer. */
+function isAeonStorePath(pathname) {
+  return /^\/store\/[^/].+/i.test(pathname || '') && !String(pathname).includes('..');
+}
+
+/** Harashin / Narus shop page, e.g. /shops/kurosaki/ */
+function isHarashinShopPath(pathname) {
+  return /^\/shops\/[a-z0-9_-]+\/?$/i.test(pathname || '');
 }
 
 async function resolveAeonViewer(viewerUrl) {
@@ -532,6 +557,18 @@ function assertHtmlResolveAllowlisted(rawUrl) {
     }
     return;
   }
+  if (host === 'www.aeon.com' || host === 'aeon.com') {
+    if (!isAeonStorePath(path)) {
+      throw proxyError(403, 'blocked_path', 'このパスのHTML取得は許可されていません。');
+    }
+    return;
+  }
+  if (host === 'www.harashinnarus.jp' || host === 'harashinnarus.jp') {
+    if (!isHarashinShopPath(path)) {
+      throw proxyError(403, 'blocked_path', 'このパスのHTML取得は許可されていません。');
+    }
+    return;
+  }
   // chirashi.kurashiru.com
   const widgetRe = new RegExp(`^/widgets/${KURASHIRU_UUID_RE}/leaflets/?$`, 'i');
   const storeRe = new RegExp(`^/stores/${KURASHIRU_UUID_RE}(?:/|$)`, 'i');
@@ -634,6 +671,243 @@ async function resolveUorokuFlyerPage(viewerUrl) {
     if (!result.title) result.title = shopName;
   }
   return result;
+}
+
+/**
+ * www.aeon.com store page → data-flyer-id (shop s_id) → current chirashi images.
+ * The listing iframe is filled by JS; the shop id is in the static HTML.
+ * @param {URL} pageUrl
+ */
+async function resolveAeonStorePage(pageUrl) {
+  const html = await fetchHtmlSafely(pageUrl.href);
+  const shopId = extractAeonShopId(html);
+  if (!shopId) {
+    throw proxyError(
+      404,
+      'flyer_not_found',
+      'イオン店舗ページからチラシの店舗IDを見つけられませんでした。URLを確認するか、写真から追加してください。',
+    );
+  }
+  return resolveAeonShopCurrentFlyers(shopId);
+}
+
+/**
+ * Shop id from Aeon STORE HTML (`data-flyer-id` or a chirashi shop_id link).
+ * @param {string} html
+ */
+function extractAeonShopId(html) {
+  const text = decodeBasicHtmlEntities(html);
+  /** @type {string[]} */
+  const ids = [];
+  const attrRe = /data-flyer-id=["'](\d{7,12})["']/gi;
+  let m;
+  while ((m = attrRe.exec(text)) !== null) ids.push(m[1]);
+  const shopRe =
+    /chirashi\.otoku\.aeonsquare\.net[^"'<\s]*[?&]shop_id=(\d{7,12})\b/gi;
+  while ((m = shopRe.exec(text)) !== null) ids.push(m[1]);
+  if (!ids.length) return '';
+  const counts = new Map();
+  for (const id of ids) counts.set(id, (counts.get(id) || 0) + 1);
+  let best = '';
+  let bestN = 0;
+  for (const [id, n] of counts) {
+    if (n > bestN) {
+      best = id;
+      bestN = n;
+    }
+  }
+  return best;
+}
+
+/**
+ * All pages of flyers whose start/end (JST) include now.
+ * Same date window as chirashi.otoku listing (`showFlier`).
+ * @param {string} shopId
+ */
+async function resolveAeonShopCurrentFlyers(shopId) {
+  const jsonId = shopId.substring(3, 10);
+  if (!/^\d+$/.test(shopId) || shopId.length < 7 || !/^\d{7}$/.test(jsonId)) {
+    throw proxyError(
+      400,
+      'missing_params',
+      '店舗ID（s_id）の形式が正しくありません。写真から追加してください。',
+    );
+  }
+  const jsonUrl = `https://chirashi.otoku.aeonsquare.net/viewer/json/${jsonId}.json`;
+  const shop = await fetchJsonSafely(jsonUrl);
+  const fliers = shop?.fliers;
+  if (!fliers || typeof fliers !== 'object') {
+    throw proxyError(
+      404,
+      'flyer_not_found',
+      '店舗のチラシ情報が見つかりませんでした。写真から追加してください。',
+    );
+  }
+
+  const now = Date.now();
+  /** @type {Record<string, unknown>[]} */
+  const current = [];
+  for (const entry of Object.values(fliers)) {
+    if (!entry || typeof entry !== 'object') continue;
+    if (!isAeonFlierCurrent(entry, now)) continue;
+    current.push(entry);
+  }
+
+  const images = collectAeonImages('chirashi.otoku.aeonsquare.net', current);
+  if (!images.length) {
+    throw proxyError(
+      404,
+      'flyer_not_found',
+      'いま掲載中のチラシが見つかりませんでした。写真から追加してください。',
+    );
+  }
+
+  const shopName = shop.name ? String(shop.name) : '';
+  const onlyTitle =
+    current.length === 1 && current[0].title ? String(current[0].title) : '';
+  return {
+    source: 'aeon',
+    title: onlyTitle || shopName,
+    shopName,
+    images,
+  };
+}
+
+/**
+ * @param {string} dateStr "YYYY-MM-DD HH:mm:ss" interpreted as JST
+ * @returns {number | null}
+ */
+function parseAeonJstMs(dateStr) {
+  const m = String(dateStr || '').match(
+    /^(\d{4})-(\d{2})-(\d{2})(?: (\d{2}):(\d{2}):(\d{2}))?$/,
+  );
+  if (!m) return null;
+  const iso = `${m[1]}-${m[2]}-${m[3]}T${m[4] || '00'}:${m[5] || '00'}:${m[6] || '00'}+09:00`;
+  const t = Date.parse(iso);
+  return Number.isNaN(t) ? null : t;
+}
+
+function isAeonFlierCurrent(entry, nowMs) {
+  const start = parseAeonJstMs(entry.start);
+  const end = parseAeonJstMs(entry.end);
+  if (start == null || end == null) return false;
+  return nowMs >= start && nowMs <= end;
+}
+
+/**
+ * @param {string} host
+ * @param {Record<string, unknown>[]} entries
+ */
+function collectAeonImages(host, entries) {
+  const imageBase = `https://${host}/viewer/images/`;
+  /** @type {{ url: string, thumbUrl?: string, label: string }[]} */
+  const images = [];
+  const seen = new Set();
+  for (const entry of entries) {
+    const list = Array.isArray(entry.images) ? entry.images : [];
+    /** @type {string[]} */
+    const valid = [];
+    for (const filename of list) {
+      const name = String(filename || '').trim();
+      if (!name || name.includes('/') || name.includes('..')) continue;
+      if (!/\.(jpe?g|png|gif|webp)$/i.test(name)) continue;
+      if (seen.has(name)) continue;
+      valid.push(name);
+    }
+    const flyerTitle = entry.title ? String(entry.title) : '';
+    valid.forEach((name, idx) => {
+      seen.add(name);
+      let label;
+      if (flyerTitle && valid.length > 1) label = `${flyerTitle} ${idx + 1}枚目`;
+      else if (flyerTitle) label = flyerTitle;
+      else label = `${images.length + 1}枚目`;
+      const url = `${imageBase}${name}`;
+      images.push({
+        url,
+        thumbUrl: toAeonThumbUrl(imageBase, name),
+        label,
+      });
+    });
+  }
+  return images;
+}
+
+/**
+ * Harashin shop page: flyer JPEGs are in the static HTML (registeredStore02).
+ * @param {URL} pageUrl
+ */
+async function resolveHarashinShopPage(pageUrl) {
+  const html = await fetchHtmlSafely(pageUrl.href);
+  const images = parseHarashinShopFlyers(html);
+  if (!images.length) {
+    throw proxyError(
+      404,
+      'flyer_not_found',
+      '原信店舗ページからチラシ画像が見つかりませんでした。URLを確認するか、写真から追加してください。',
+    );
+  }
+  const h1 = html.match(/<h1[^>]*>([^<]+)<\/h1>/i);
+  const shopName = h1 ? decodeBasicHtmlEntities(h1[1]).trim() : '';
+  return {
+    source: 'harashin',
+    title: shopName || images[0].label,
+    shopName,
+    images,
+  };
+}
+
+/**
+ * @param {string} html
+ * @returns {{ url: string, label: string }[]}
+ */
+function parseHarashinShopFlyers(html) {
+  /** @type {{ url: string, label: string }[]} */
+  const images = [];
+  const seen = new Set();
+  const liRe =
+    /<li\b[^>]*class="[^"]*registeredStore02__single[^"]*"[\s\S]*?<\/li>/gi;
+  let li;
+  while ((li = liRe.exec(html)) !== null) {
+    const block = li[0];
+    const numMatch = block.match(/class="num"[^>]*>([^<]*)</i);
+    const groupTitle = numMatch ? decodeBasicHtmlEntities(numMatch[1]).trim() : '';
+    const flyerDivRe =
+      /<div\b[^>]*class="[^"]*\bflyer\d*\b[^"]*"[^>]*>\s*(<img\b[^>]*>)/gi;
+    /** @type {{ src: string, alt: string }[]} */
+    const found = [];
+    let fd;
+    while ((fd = flyerDivRe.exec(block)) !== null) {
+      const tag = fd[1];
+      const srcM = tag.match(/\bsrc="([^"]+)"/i);
+      if (!srcM) continue;
+      const altM = tag.match(/\balt="([^"]*)"/i);
+      found.push({
+        src: decodeBasicHtmlEntities(srcM[1]),
+        alt: altM ? decodeBasicHtmlEntities(altM[1]).trim() : '',
+      });
+    }
+    found.forEach((img, idx) => {
+      let abs;
+      try {
+        abs = new URL(img.src, 'https://www.harashinnarus.jp/');
+      } catch {
+        return;
+      }
+      const host = abs.hostname.toLowerCase();
+      if (host !== 'www.harashinnarus.jp' && host !== 'harashinnarus.jp') return;
+      if (!/\/hnhp_wp\/wp-content\/uploads\//i.test(abs.pathname)) return;
+      if (!/\.(jpe?g|png|gif|webp)$/i.test(abs.pathname)) return;
+      if (seen.has(abs.href)) return;
+      seen.add(abs.href);
+      const base = groupTitle || img.alt || '';
+      let label;
+      if (found.length === 2 && base) label = `${base}（${idx === 0 ? '表' : '裏'}）`;
+      else if (found.length > 1 && base) label = `${base} ${idx + 1}枚目`;
+      else label = base || `${images.length + 1}枚目`;
+      images.push({ url: abs.href, label });
+    });
+  }
+  return images;
 }
 
 /**

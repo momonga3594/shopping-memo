@@ -15,19 +15,23 @@ npx wrangler deploy
 
 成功すると `https://shopping-memo-flyer-proxy.<あなたのサブドメイン>.workers.dev` のような URL が表示されます。
 
-任意の共有シークレット（推奨）:
+**本番（このリポジトリ所有者向け）:** `https://shopping-memo-flyer-proxy.momonga3594.workers.dev`
+
+任意の共有シークレット（推奨・Worker URL が公開のとき）:
 
 ```bash
 npx wrangler secret put PROXY_SECRET
 # 値を入力（例: 長いランダム文字列）
 ```
 
+未設定（空）のままでも認証なしで動作します。現状の本番は未設定です。
+
 ## アプリ側の設定
 
 1. 買い物メモ → ⚙️設定
 2. 「チラシ画像プロキシ URL」に Worker のベース URL を貼る（末尾スラッシュなしで可）  
-   例: `https://shopping-memo-flyer-proxy.example.workers.dev`
-3. シークレットを設定した場合は「プロキシ用シークレット」にも同じ値を保存
+   本番例: `https://shopping-memo-flyer-proxy.momonga3594.workers.dev`
+3. 「プロキシ用シークレット」: Worker に `PROXY_SECRET` を付けたときだけ同じ値を保存。空 = 認証なし
 4. 「保存」
 
 チラシタブの「URLから読み込み」は、プロキシが設定されていれば  

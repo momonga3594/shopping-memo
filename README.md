@@ -4,6 +4,8 @@
 
 公開 URL: https://momonga3594.github.io/shopping-memo/
 
+実機確認用チェックリスト: [docs/smoke-test.md](docs/smoke-test.md)
+
 ## 機能
 
 - テキストで買い物アイテムを追加（名前＋任意の数量・購入先）
@@ -52,16 +54,30 @@ CORS で直接取得できない画像URL向けに、Cloudflare Worker の小さ
 
 **本番デプロイ済み URL:** `https://shopping-memo-flyer-proxy.momonga3594.workers.dev`
 
-1. アプリの設定（⚙️）に上記プロキシ URL を保存する
-2. （推奨）Worker 側でシークレットを設定し、アプリにも同じ値を入れる:
-   ```bash
-   cd workers/flyer-proxy
-   npx wrangler secret put PROXY_SECRET
-   ```
-   アプリ設定の「プロキシ用シークレット」に同じ文字列を保存する
-3. 新規デプロイや再デプロイが必要なときは `workers/flyer-proxy` で `npx wrangler deploy`（詳細は同ディレクトリの README）
+#### アプリ設定
 
-プロキシ未設定時は従来どおりブラウザ直接取得にフォールバックします（失敗しやすいです）。  
+1. ⚙️設定を開く
+2. 「チラシ画像プロキシ URL」に上記 URL をそのまま貼る（末尾スラッシュなし）
+3. 「プロキシ用シークレット」（プロキシシークレット）:
+   - **空のまま** = 認証なし（**現状の本番はこの状態**）
+   - Worker に `PROXY_SECRET` を設定した場合は、**同じ値**をここに保存する
+4. 「保存」
+
+#### Worker 側でシークレットを付ける（推奨・任意）
+
+Worker URL が公開されている場合は設定を推奨します。未設定でも動作します。
+
+```bash
+cd workers/flyer-proxy
+npx wrangler secret put PROXY_SECRET
+# プロンプトで長いランダム文字列を入力
+```
+
+アプリ設定の「プロキシ用シークレット」にも同じ文字列を保存してください。片方だけだと画像取得が 401 になります。
+
+新規デプロイや再デプロイ: `workers/flyer-proxy` で `npx wrangler deploy`（詳細は同ディレクトリの README）。
+
+プロキシ URL 未設定時は従来どおりブラウザ直接取得にフォールバックします（失敗しやすいです）。  
 **公開の第三者 CORS プロキシは使わないでください。**
 
 ### セキュリティ上の注意（クライアント側 API キー）
@@ -92,31 +108,35 @@ npm run build
 npm run preview
 ```
 
-`dist/` に静的ファイルが出力されます。GitHub Pages は `gh-pages` ブランチから配信しています（Vite `base: '/shopping-memo/'`）。
+`dist/` に静的ファイルが出力されます。
 
 ## 公開・デプロイ（GitHub Pages）
 
-本番は `gh-pages` ブランチから配信します（Vite `base: '/shopping-memo/'`）。
+本番は **`gh-pages` ブランチ** から配信します（Vite `base: '/shopping-memo/'`）。
 
-### 自動デプロイ（推奨）
+### 自動デプロイ（推奨・一本化）
 
-`main` への push で `.github/workflows/deploy-pages.yml` が `npm ci` → `npm run build` → `gh-pages` へ `dist` を配信します。手動で `gh-pages` を触る必要はありません（並走すると上書き事故の原因になります）。
+予定: `main` への push（または Actions の `workflow_dispatch`）で  
+`.github/workflows/deploy-pages.yml` が `npm ci` → `npm run build` → `dist` を `gh-pages` へ配信します。
 
-Actions の workflow ファイルを初めて追加・変更するには、GitHub トークンに **`workflow` スコープ** が必要です。
+- `.nojekyll` と SPA 用 `404.html`（`index.html` のコピー）は workflow 側で付与します
+- **Actions 導入後は手動で `gh-pages` を触らないでください**（並走すると上書き事故の原因になります）
 
-### 手動デプロイ（逃げ道）
+**現状ブロッカー:** workflow ファイルの追加には GitHub OAuth／PAT の **`workflow` スコープ** が必要です。付与されるまで下記の手動デプロイを使います（草案は `docs/examples/deploy-pages.yml`（付与後に `.github/workflows/deploy-pages.yml` へコピー））。
 
-Actions が使えないときだけ:
+### 手動デプロイ（現状の本番更新手段／Actions 不可時の逃げ道）
+
+Actions がリポジトリに入るまでのあいだ、または Actions 障害時:
 
 ```bash
 npm ci
 npm run build
 touch dist/.nojekyll
 cp dist/index.html dist/404.html
-# dist の内容を gh-pages ブランチへ配置して push
+npx gh-pages -d dist
 ```
 
-自動デプロイ導入後は、この手動手順は使わず Actions に一本化してください。
+自動デプロイが動くようになったら、この手動手順は使わず Actions に一本化してください。
 
 ## 音声入力について
 

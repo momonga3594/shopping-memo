@@ -50,12 +50,19 @@
 
 CORS で直接取得できない画像URL向けに、Cloudflare Worker の小さなプロキシを同梱しています（`workers/flyer-proxy/`）。
 
-1. `workers/flyer-proxy` で `npx wrangler deploy`（手順は同ディレクトリの README）
-2. アプリの設定に Worker のベース URL（例: `https://shopping-memo-flyer-proxy.<subdomain>.workers.dev`）を保存
-3. 任意で Worker の `PROXY_SECRET` と同じ値を「プロキシ用シークレット」に保存
+**本番デプロイ済み URL:** `https://shopping-memo-flyer-proxy.momonga3594.workers.dev`
+
+1. アプリの設定（⚙️）に上記プロキシ URL を保存する
+2. （推奨）Worker 側でシークレットを設定し、アプリにも同じ値を入れる:
+   ```bash
+   cd workers/flyer-proxy
+   npx wrangler secret put PROXY_SECRET
+   ```
+   アプリ設定の「プロキシ用シークレット」に同じ文字列を保存する
+3. 新規デプロイや再デプロイが必要なときは `workers/flyer-proxy` で `npx wrangler deploy`（詳細は同ディレクトリの README）
 
 プロキシ未設定時は従来どおりブラウザ直接取得にフォールバックします（失敗しやすいです）。  
-**公開の第三者 CORS プロキシは使わないでください。** このリポジトリの Worker を自分のアカウントにデプロイする想定です。デフォルトの workers.dev URL は同梱していません（各自のデプロイが必要です）。
+**公開の第三者 CORS プロキシは使わないでください。**
 
 ### セキュリティ上の注意（クライアント側 API キー）
 
@@ -86,6 +93,30 @@ npm run preview
 ```
 
 `dist/` に静的ファイルが出力されます。GitHub Pages は `gh-pages` ブランチから配信しています（Vite `base: '/shopping-memo/'`）。
+
+## 公開・デプロイ（GitHub Pages）
+
+本番は `gh-pages` ブランチから配信します（Vite `base: '/shopping-memo/'`）。
+
+### 自動デプロイ（推奨）
+
+`main` への push で `.github/workflows/deploy-pages.yml` が `npm ci` → `npm run build` → `gh-pages` へ `dist` を配信します。手動で `gh-pages` を触る必要はありません（並走すると上書き事故の原因になります）。
+
+Actions の workflow ファイルを初めて追加・変更するには、GitHub トークンに **`workflow` スコープ** が必要です。
+
+### 手動デプロイ（逃げ道）
+
+Actions が使えないときだけ:
+
+```bash
+npm ci
+npm run build
+touch dist/.nojekyll
+cp dist/index.html dist/404.html
+# dist の内容を gh-pages ブランチへ配置して push
+```
+
+自動デプロイ導入後は、この手動手順は使わず Actions に一本化してください。
 
 ## 音声入力について
 

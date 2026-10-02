@@ -1,7 +1,7 @@
 # チラシ画像プロキシ（Cloudflare Worker）
 
 ブラウザから直接取得できない（CORS）チラシ画像URLを、サーバー側で取得して返す小さなプロキシです。  
-イオンのチラシ**ビューアURL**から画像一覧を解決するモードもあります。  
+イオン／ウオロク／クラシルのチラシ**ビューア・店舗URL**から画像一覧を解決するモードもあります。  
 **Gemini API キーは扱いません。** 画像バイトの中継とビューア解決のみです。
 
 ## デプロイ
@@ -36,7 +36,8 @@ npx wrangler secret put PROXY_SECRET
 
 チラシタブの「URLから読み込み」は、プロキシが設定されていれば  
 - 画像直リンク: `GET {proxy}/?url={encodeURIComponent(imageUrl)}`
-- イオンビューア: `GET {proxy}/?resolve={encodeURIComponent(viewerUrl)}`  
+- ビューア／店舗 resolve: `GET {proxy}/?resolve={encodeURIComponent(viewerUrl)}`  
+  （イオン / ウオロク店舗チラシ / クラシルウィジェット・店舗）  
 経由で取得します。
 
 ## API
@@ -47,9 +48,16 @@ npx wrangler secret put PROXY_SECRET
 
 ### `GET /?resolve=<viewer-url>`
 
-対応ビューア（現状: イオン `chirashi.otoku.aeonsquare.net`）を解析し、画像URL一覧を JSON で返します。
+対応 URL を解析し、画像URL一覧を JSON で返します。
 
-成功例:
+| 種別 | 例 |
+|------|----|
+| イオン ビューア | `https://chirashi.otoku.aeonsquare.net/viewer/index.html?...&s_id=...&f_id=...` |
+| ウオロク店舗チラシ | `https://www.uoroku.co.jp/shop/flyer/kandoji.html`（ページ内のクラシル iframe を辿る） |
+| クラシルウィジェット | `https://chirashi.kurashiru.com/widgets/{uuid}/leaflets` |
+| クラシル店舗 | `https://chirashi.kurashiru.com/stores/{uuid}` または `/stores/{uuid}/limit_excursion?...` |
+
+成功例（イオン）:
 
 ```json
 {
@@ -61,6 +69,23 @@ npx wrangler secret put PROXY_SECRET
       "url": "https://chirashi.otoku.aeonsquare.net/viewer/images/....jpg",
       "thumbUrl": "https://.../viewer/images/....t.jpg",
       "label": "1枚目"
+    }
+  ]
+}
+```
+
+成功例（クラシル／ウオロク）:
+
+```json
+{
+  "source": "kurashiru",
+  "title": "秋御膳",
+  "shopName": "ウオロク　神道寺店のチラシ情報",
+  "images": [
+    {
+      "url": "https://video.kurashiru.com/production/chirashiru_leaflet/image/3115121/....jpg",
+      "thumbUrl": "https://video.kurashiru.com/.../thumbnail_....jpg",
+      "label": "秋御膳"
     }
   ]
 }
@@ -102,7 +127,9 @@ npx wrangler secret put PROXY_SECRET
 - リダイレクトは手動フォロー（最大 5 hop）。各 hop で再検証
 - 応答サイズ上限 約 8MB（画像）／約 2MB（JSON）、タイムアウト約 15 秒
 - 画像: `Content-Type: image/*` またはマジックバイトで画像判定
-- resolve の JSON 取得は allowlist ホスト＋`/viewer/json/{7桁}.json` のみ
+- resolve の JSON 取得（イオン）は allowlist ホスト＋`/viewer/json/{7桁}.json` のみ
+- resolve の HTML 取得は allowlist のみ: `www.uoroku.co.jp` / `uoroku.co.jp`（`/shop/flyer/`）、`chirashi.kurashiru.com`（`/widgets/{uuid}/leaflets` または `/stores/{uuid}`）
+- クラシル画像は `thumbnail_` / `compressed_` を外したフル JPEG を `url` に、縮小版を `thumbUrl` に載せる
 - ブラウザ風 `User-Agent` を付与
 
 ## ローカル確認
@@ -111,4 +138,5 @@ npx wrangler secret put PROXY_SECRET
 npx wrangler dev
 curl -i "http://127.0.0.1:8787/?url=https%3A%2F%2Fhttpbin.org%2Fimage%2Fjpeg"
 curl -i "http://127.0.0.1:8787/?resolve=https%3A%2F%2Fchirashi.otoku.aeonsquare.net%2Fviewer%2Findex.html%3Fd%3Dsp%26s_id%3D0000021780%26f_id%3Df176358"
+curl -i "http://127.0.0.1:8787/?resolve=https%3A%2F%2Fwww.uoroku.co.jp%2Fshop%2Fflyer%2Fkandoji.html"
 ```

@@ -1,12 +1,13 @@
 /**
  * shopping-memo flyer image proxy (Cloudflare Worker)
  * Fetches remote images server-side to bypass browser CORS.
- * Also resolves known flyer VIEWER pages (Aeon) to image URL lists.
+ * Also resolves known flyer VIEWER / store pages (Aeon, Uoroku, Kurashiru) to image URL lists.
  * No Gemini / API keys are handled here.
  */
 
 const MAX_BYTES = 8 * 1024 * 1024; // 8 MiB
 const MAX_JSON_BYTES = 2 * 1024 * 1024; // 2 MiB
+const MAX_HTML_BYTES = 2 * 1024 * 1024; // 2 MiB
 const MAX_REDIRECTS = 5;
 const FETCH_TIMEOUT_MS = 15_000;
 const USER_AGENT =
@@ -24,6 +25,16 @@ const DEFAULT_ALLOWED_ORIGINS = [
 
 /** Hosts allowed for Aeon chirashi viewer resolve */
 const AEON_VIEWER_HOSTS = new Set(['chirashi.otoku.aeonsquare.net']);
+
+/** Hosts allowed for HTML resolve fetches (Uoroku / Kurashiru) */
+const HTML_RESOLVE_HOSTS = new Set([
+  'www.uoroku.co.jp',
+  'uoroku.co.jp',
+  'chirashi.kurashiru.com',
+]);
+
+const KURASHIRU_UUID_RE =
+  '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}';
 
 export default {
   async fetch(request, env) {
@@ -296,7 +307,7 @@ async function resolveDns(hostname) {
   return results;
 }
 
-/* ---------- Viewer resolve (Aeon) ---------- */
+/* ---------- Viewer resolve (Aeon / Uoroku / Kurashiru) ---------- */
 
 async function resolveViewerUrl(rawViewerUrl) {
   const viewer = parseAndValidateUrl(rawViewerUrl);
@@ -306,10 +317,28 @@ async function resolveViewerUrl(rawViewerUrl) {
     return resolveAeonViewer(viewer);
   }
 
+  if (
+    (host === 'www.uoroku.co.jp' || host === 'uoroku.co.jp') &&
+    viewer.pathname.includes('/shop/flyer/')
+  ) {
+    return resolveUorokuFlyerPage(viewer);
+  }
+
+  if (host === 'chirashi.kurashiru.com') {
+    const widgetRe = new RegExp(`^/widgets/${KURASHIRU_UUID_RE}/leaflets/?$`, 'i');
+    const storeRe = new RegExp(`^/stores/${KURASHIRU_UUID_RE}(?:/|$)`, 'i');
+    if (widgetRe.test(viewer.pathname)) {
+      return resolveKurashiruWidget(viewer);
+    }
+    if (storeRe.test(viewer.pathname)) {
+      return resolveKurashiruStore(viewer);
+    }
+  }
+
   throw proxyError(
     400,
     'unsupported_viewer',
-    'このビューアURLには未対応です。イオンのチラシビューアURL、または画像の直リンクを指定してください。',
+    'このビューアURLには未対応です。イオン／ウオロク店舗チラシ／クラシルウィジェットのURL、または画像の直リンクを指定してください。',
   );
 }
 
@@ -450,6 +479,301 @@ function toAeonThumbUrl(imageBase, filename) {
   const m = filename.match(/^(.*)(\.[^.]+)$/);
   if (!m) return undefined;
   return `${imageBase}${m[1]}.t${m[2]}`;
+}
+
+function decodeBasicHtmlEntities(s) {
+  return String(s || '')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&nbsp;/g, ' ');
+}
+
+/**
+ * Prefer full JPEG: strip thumbnail_ / compressed_ from the filename.
+ * @param {string} imageUrl
+ */
+function kurashiruPreferFullImageUrl(imageUrl) {
+  try {
+    const u = new URL(imageUrl);
+    const parts = u.pathname.split('/');
+    const file = parts[parts.length - 1] || '';
+    const cleaned = file.replace(/^(?:thumbnail_|compressed_)/i, '');
+    if (cleaned && cleaned !== file) {
+      parts[parts.length - 1] = cleaned;
+      u.pathname = parts.join('/');
+    }
+    return u.href;
+  } catch {
+    return String(imageUrl || '').replace(
+      /\/(thumbnail_|compressed_)([^/?#]+)$/i,
+      '/$2',
+    );
+  }
+}
+
+function assertHtmlResolveAllowlisted(rawUrl) {
+  let u;
+  try {
+    u = new URL(rawUrl);
+  } catch {
+    throw proxyError(400, 'invalid_url', 'HTML URLが不正です。');
+  }
+  const host = u.hostname.toLowerCase();
+  if (!HTML_RESOLVE_HOSTS.has(host)) {
+    throw proxyError(403, 'blocked_host', 'このホストのHTML取得は許可されていません。');
+  }
+  const path = u.pathname || '';
+  if (host === 'www.uoroku.co.jp' || host === 'uoroku.co.jp') {
+    if (!path.includes('/shop/flyer/')) {
+      throw proxyError(403, 'blocked_path', 'このパスのHTML取得は許可されていません。');
+    }
+    return;
+  }
+  // chirashi.kurashiru.com
+  const widgetRe = new RegExp(`^/widgets/${KURASHIRU_UUID_RE}/leaflets/?$`, 'i');
+  const storeRe = new RegExp(`^/stores/${KURASHIRU_UUID_RE}(?:/|$)`, 'i');
+  if (!widgetRe.test(path) && !storeRe.test(path)) {
+    throw proxyError(403, 'blocked_path', 'このパスのHTML取得は許可されていません。');
+  }
+}
+
+async function fetchHtmlSafely(rawUrl) {
+  let current = parseAndValidateUrl(rawUrl);
+  assertHtmlResolveAllowlisted(current.href);
+  await resolveAndCheckHost(current.hostname);
+
+  for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+    let res;
+    try {
+      res = await fetch(current.href, {
+        method: 'GET',
+        redirect: 'manual',
+        signal: controller.signal,
+        headers: {
+          'User-Agent': USER_AGENT,
+          Accept: 'text/html,application/xhtml+xml;q=0.9,*/*;q=0.8',
+          'Accept-Language': 'ja,en;q=0.8',
+        },
+      });
+    } catch (err) {
+      clearTimeout(timer);
+      if (err?.name === 'AbortError') {
+        throw proxyError(504, 'timeout', 'チラシページの取得がタイムアウトしました。');
+      }
+      throw proxyError(502, 'fetch_failed', 'チラシページの取得に失敗しました。');
+    }
+    clearTimeout(timer);
+
+    if ([301, 302, 303, 307, 308].includes(res.status)) {
+      const loc = res.headers.get('Location');
+      if (!loc) {
+        throw proxyError(502, 'bad_redirect', 'リダイレクト先がありません。');
+      }
+      if (hop === MAX_REDIRECTS) {
+        throw proxyError(502, 'too_many_redirects', 'リダイレクトが多すぎます。');
+      }
+      let next;
+      try {
+        next = new URL(loc, current);
+      } catch {
+        throw proxyError(502, 'bad_redirect', 'リダイレクトURLが不正です。');
+      }
+      current = parseAndValidateUrl(next.href);
+      assertHtmlResolveAllowlisted(current.href);
+      await resolveAndCheckHost(current.hostname);
+      continue;
+    }
+
+    if (!res.ok) {
+      throw proxyError(
+        502,
+        'upstream_error',
+        `チラシページがエラーを返しました（HTTP ${res.status}）。`,
+      );
+    }
+
+    const buf = await readBodyLimited(res, MAX_HTML_BYTES);
+    return new TextDecoder('utf-8').decode(buf);
+  }
+
+  throw proxyError(502, 'too_many_redirects', 'リダイレクトが多すぎます。');
+}
+
+/**
+ * Uoroku store flyer page → extract Kurashiru widget iframe → resolve leaflets.
+ * @param {URL} viewerUrl
+ */
+async function resolveUorokuFlyerPage(viewerUrl) {
+  const html = await fetchHtmlSafely(viewerUrl.href);
+  const widgetRe = new RegExp(
+    `https://chirashi\\.kurashiru\\.com/widgets/(${KURASHIRU_UUID_RE})/leaflets`,
+    'i',
+  );
+  const m = html.match(widgetRe);
+  if (!m) {
+    throw proxyError(
+      404,
+      'flyer_not_found',
+      'ウオロク店舗ページからクラシルウィジェットを見つけられませんでした。URLを確認するか、写真から追加してください。',
+    );
+  }
+  const widgetUrl = new URL(
+    `https://chirashi.kurashiru.com/widgets/${m[1]}/leaflets`,
+  );
+  const result = await resolveKurashiruWidget(widgetUrl);
+
+  const h1 = html.match(/<h1[^>]*>([^<]+)<\/h1>/i);
+  const shopName = h1 ? decodeBasicHtmlEntities(h1[1]).trim() : '';
+  if (shopName) {
+    result.shopName = shopName;
+    if (!result.title) result.title = shopName;
+  }
+  return result;
+}
+
+/**
+ * @param {URL} viewerUrl
+ */
+async function resolveKurashiruWidget(viewerUrl) {
+  const html = await fetchHtmlSafely(viewerUrl.href);
+  const images = parseKurashiruWidgetLeaflets(html);
+  if (!images.length) {
+    throw proxyError(
+      404,
+      'flyer_not_found',
+      'クラシルウィジェットからチラシ画像が見つかりませんでした。URLを確認するか、写真から追加してください。',
+    );
+  }
+  const title = images[0]?.label && !/^\d+枚目$/.test(images[0].label) ? images[0].label : '';
+  return {
+    source: 'kurashiru',
+    title: title || '',
+    shopName: '',
+    images,
+  };
+}
+
+/**
+ * @param {URL} viewerUrl
+ */
+async function resolveKurashiruStore(viewerUrl) {
+  const html = await fetchHtmlSafely(viewerUrl.href);
+  const images = parseKurashiruStoreLeaflets(html);
+  if (!images.length) {
+    // Fallback: some store pages may still embed widget-like markup
+    const fallback = parseKurashiruWidgetLeaflets(html);
+    if (!fallback.length) {
+      throw proxyError(
+        404,
+        'flyer_not_found',
+        'クラシル店舗ページからチラシ画像が見つかりませんでした。URLを確認するか、写真から追加してください。',
+      );
+    }
+    return {
+      source: 'kurashiru',
+      title: fallback[0]?.label && !/^\d+枚目$/.test(fallback[0].label) ? fallback[0].label : '',
+      shopName: '',
+      images: fallback,
+    };
+  }
+  const title = images[0]?.label && !/^\d+枚目$/.test(images[0].label) ? images[0].label : '';
+  return {
+    source: 'kurashiru',
+    title: title || '',
+    shopName: '',
+    images,
+  };
+}
+
+/**
+ * Parse LeafletCarouselWidget anchors from Kurashiru widget HTML.
+ * @param {string} html
+ * @returns {{ url: string, thumbUrl?: string, label: string }[]}
+ */
+function parseKurashiruWidgetLeaflets(html) {
+  /** @type {{ url: string, thumbUrl?: string, label: string }[]} */
+  const images = [];
+  const seen = new Set();
+  const anchorRe =
+    /<a\b[^>]*\bdata-leaflet-id="(\d+)"[^>]*>([\s\S]*?)<\/a>/gi;
+  let m;
+  while ((m = anchorRe.exec(html)) !== null) {
+    const id = m[1];
+    if (seen.has(id)) continue;
+    const block = m[2];
+    const thumbMatch = block.match(
+      /src="(https:\/\/video\.kurashiru\.com\/production\/chirashiru_leaflet\/image\/\d+\/[^"]+)"/i,
+    );
+    if (!thumbMatch) continue;
+    const thumbUrl = decodeBasicHtmlEntities(thumbMatch[1]);
+    const fullUrl = kurashiruPreferFullImageUrl(thumbUrl);
+
+    let label = '';
+    const titleMatch = block.match(
+      /LeafletCarouselWidget-leafletTitle[^>]*>([^<]*)</i,
+    );
+    if (titleMatch) label = decodeBasicHtmlEntities(titleMatch[1]).trim();
+    if (!label) {
+      const altMatch = block.match(/\balt="([^"]*)"/i);
+      if (altMatch) label = decodeBasicHtmlEntities(altMatch[1]).trim();
+    }
+    if (!label) label = `${images.length + 1}枚目`;
+
+    seen.add(id);
+    images.push({ url: fullUrl, thumbUrl, label });
+  }
+  return images;
+}
+
+/**
+ * Parse StoresShowLimitExcursion leaflet items from Kurashiru store HTML.
+ * @param {string} html
+ * @returns {{ url: string, thumbUrl?: string, label: string }[]}
+ */
+function parseKurashiruStoreLeaflets(html) {
+  /** @type {{ url: string, thumbUrl?: string, label: string }[]} */
+  const images = [];
+  const seen = new Set();
+  // data-leaflet-id then nearby chirashiru_leaflet image src (+ optional alt)
+  const itemRe =
+    /data-leaflet-id="(\d+)"[\s\S]{0,1500}?src="(https:\/\/video\.kurashiru\.com\/production\/chirashiru_leaflet\/image\/\1\/[^"]+)"/gi;
+  let m;
+  while ((m = itemRe.exec(html)) !== null) {
+    const id = m[1];
+    if (seen.has(id)) continue;
+    const src = decodeBasicHtmlEntities(m[2]);
+    const fullUrl = kurashiruPreferFullImageUrl(src);
+    // Prefer keeping a thumbnail_/compressed_ variant as thumb when present
+    const thumbUrl = /\/(?:thumbnail_|compressed_)/i.test(src) ? src : undefined;
+
+    let label = '';
+    // Look slightly before the match for alt on the same img (alt may precede src)
+    const windowStart = Math.max(0, m.index - 200);
+    const around = html.slice(windowStart, m.index + m[0].length + 50);
+    const altMatch = around.match(
+      new RegExp(
+        `alt="([^"]*)"[\\s\\S]{0,400}?src="${escapeRegExp(m[2])}"|src="${escapeRegExp(m[2])}"[\\s\\S]{0,200}?alt="([^"]*)"`,
+        'i',
+      ),
+    );
+    if (altMatch) label = decodeBasicHtmlEntities(altMatch[1] || altMatch[2] || '').trim();
+    // Strip common brand prefix like "ウオロク "
+    if (label) label = label.replace(/^ウオロク\s+/, '').trim() || label;
+    if (!label) label = `${images.length + 1}枚目`;
+
+    seen.add(id);
+    images.push({ url: fullUrl, thumbUrl, label });
+  }
+  return images;
+}
+
+function escapeRegExp(s) {
+  return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 async function fetchJsonSafely(rawUrl) {

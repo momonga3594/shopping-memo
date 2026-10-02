@@ -1342,6 +1342,40 @@ function isAeonViewerUrl(parsed) {
 }
 
 /**
+ * Uoroku store flyer page (embeds Kurashiru widget)
+ * @param {URL} parsed
+ */
+function isUorokuFlyerPageUrl(parsed) {
+  const host = parsed.hostname.toLowerCase();
+  if (!host.endsWith('uoroku.co.jp')) return false;
+  return parsed.pathname.includes('/shop/flyer/');
+}
+
+/**
+ * Kurashiru chirashi widget or store page
+ * @param {URL} parsed
+ */
+function isKurashiruWidgetOrStoreUrl(parsed) {
+  if (parsed.hostname.toLowerCase() !== 'chirashi.kurashiru.com') return false;
+  const path = parsed.pathname || '';
+  if (/^\/widgets\/[^/]+\/leaflets\/?$/i.test(path)) return true;
+  if (/^\/stores\/[^/]+/i.test(path)) return true;
+  return false;
+}
+
+/**
+ * Viewer / store URLs the Worker can resolve to an image list
+ * @param {URL} parsed
+ */
+function isResolvableFlyerViewerUrl(parsed) {
+  return (
+    isAeonViewerUrl(parsed) ||
+    isUorokuFlyerPageUrl(parsed) ||
+    isKurashiruWidgetOrStoreUrl(parsed)
+  );
+}
+
+/**
  * Fetch an image blob either via configured Cloudflare Worker proxy
  * or direct browser fetch (CORS-limited).
  * @param {string} imageUrl
@@ -1577,9 +1611,10 @@ function renderFlyerPagePicker(images, title) {
 }
 
 /**
+ * Resolve a supported flyer viewer/store URL via Worker, then show page picker.
  * @param {string} viewerHref
  */
-async function handleAeonViewerUrl(viewerHref) {
+async function handleFlyerViewerUrl(viewerHref) {
   if (!getFlyerProxyUrl()) {
     setFlyerStatus(
       'ビューアURLの解析にはプロキシ設定が必要です。設定でチラシ画像プロキシURLを保存するか、写真から追加してください。',
@@ -1645,9 +1680,9 @@ async function handleFlyerUrl() {
     return;
   }
 
-  // Viewer URL takes priority over treating it as a (non-image) page
-  if (isAeonViewerUrl(parsed)) {
-    await handleAeonViewerUrl(parsed.href);
+  // Viewer / store URL takes priority over treating it as a (non-image) page
+  if (isResolvableFlyerViewerUrl(parsed)) {
+    await handleFlyerViewerUrl(parsed.href);
     return;
   }
 
@@ -1655,7 +1690,7 @@ async function handleFlyerUrl() {
   const viaProxy = Boolean(getFlyerProxyUrl());
   if (!isDirectImageUrl(parsed) && !viaProxy) {
     setFlyerStatus(
-      '画像の直リンク、またはイオンのチラシビューアURLを指定してください。プロキシ未設定の場合は写真から追加もできます。',
+      '画像の直リンク、またはイオン／ウオロク／クラシルのチラシURLを指定してください。プロキシ未設定の場合は写真から追加もできます。',
       true,
     );
     return;

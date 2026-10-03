@@ -1255,3 +1255,124 @@ body {
     padding: 16px 20px 20px;
   }
 }
+
+/* ---- Meal plan from flyer sales ---- */
+.flyer-meal-btn {
+  min-height: var(--tap);
+  border: none;
+  border-radius: 12px;
+  background: var(--ai);
+  color: #fff;
+  font-size: 1rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.flyer-meal-btn:active {
+  background: var(--ai-dark);
+}
+
+.flyer-meal-btn:disabled,
+.flyer-meal-btn.busy {
+  opacity: 0.65;
+  cursor: wait;
+}
+
+.flyer-meals {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+}
+
+.flyer-meals[hidden] {
+  display: none;
+}
+
+.flyer-meals-heading {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: var(--primary-dark);
+}
+
+.flyer-meal-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.meal-day {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 12px;
+  box-shadow: var(--shadow);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.meal-day-title {
+  margin: 0 0 2px;
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: var(--primary-dark);
+  line-height: 1.4;
+}
+
+.meal-label {
+  margin: 6px 0 0;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
+.meal-uses,
+.meal-extras,
+.meal-steps {
+  margin: 0;
+  padding-left: 1.2em;
+  font-size: 0.95rem;
+  line-height: 1.45;
+}
+
+.meal-uses li,
+.meal-extras li,
+.meal-steps li {
+  margin: 2px 0;
+  word-break: break-word;
+}
+
+.meal-none {
+  list-style: none;
+  margin-left: -1.2em;
+  color: var(--muted);
+}
+
+.meal-add-btn {
+  margin-top: 8px;
+  min-height: 44px;
+  border: none;
+  border-radius: 12px;
+  background: var(--primary);
+  color: #fff;
+  font-size: 0.95rem;
+  font-weight: 700;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.meal-add-btn:active:not(:disabled) {
+  background: var(--primary-dark);
+}
+
+.meal-add-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  background: #6b7280;
+}

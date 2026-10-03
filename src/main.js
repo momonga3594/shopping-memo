@@ -74,6 +74,9 @@ const els = {
   flyerDeselectAll: document.getElementById('flyer-deselect-all'),
   flyerAddBtn: document.getElementById('flyer-add-btn'),
   flyerClearBtn: document.getElementById('flyer-clear-btn'),
+  flyerMealBtn: document.getElementById('flyer-meal-btn'),
+  flyerMeals: document.getElementById('flyer-meals'),
+  flyerMealList: document.getElementById('flyer-meal-list'),
 };
 
 /** @type {Item[]} */
@@ -82,6 +85,9 @@ let recognition = null;
 let listening = false;
 let aiBusy = false;
 let flyerBusy = false;
+let mealBusy = false;
+/** Bumped when the flyer review is cleared so an in-flight meal response is dropped. */
+let mealEpoch = 0;
 /** @type {{ mimeType: string, data: string } | null} */
 let flyerImagePayload = null;
 /** @type {string | null} */
@@ -1007,10 +1013,17 @@ function clearFlyerPagePicker() {
   if (els.flyerPagePicker) els.flyerPagePicker.hidden = true;
 }
 
+function clearMealPlan() {
+  mealEpoch += 1;
+  if (els.flyerMealList) els.flyerMealList.innerHTML = '';
+  if (els.flyerMeals) els.flyerMeals.hidden = true;
+}
+
 function clearFlyerReview() {
   els.flyerCandidateList.innerHTML = '';
   els.flyerReview.hidden = true;
   els.flyerAddBtn.disabled = true;
+  clearMealPlan();
 }
 
 function resetFlyerPanelState() {
@@ -1156,6 +1169,7 @@ function normalizeFlyerCandidates(extracted) {
 }
 
 function renderFlyerCandidates(candidates) {
+  clearMealPlan();
   els.flyerCandidateList.innerHTML = '';
   if (!candidates.length) {
     els.flyerReview.hidden = true;
@@ -1167,6 +1181,7 @@ function renderFlyerCandidates(candidates) {
   for (const cand of candidates) {
     const li = document.createElement('li');
     li.className = 'flyer-candidate';
+    li.dataset.price = cand.price || '';
 
     const check = document.createElement('input');
     check.type = 'checkbox';
@@ -1246,6 +1261,10 @@ function setFlyerBusy(busy) {
   els.tabMemo.disabled = busy;
   els.tabFlyer.disabled = busy;
   els.flyerAddBtn.disabled = busy || els.flyerAddBtn.disabled;
+  if (els.flyerMealBtn) {
+    els.flyerMealBtn.disabled = busy || mealBusy;
+    els.flyerMealBtn.classList.toggle('busy', busy || mealBusy);
+  }
   if (els.flyerPageList) {
     for (const btn of els.flyerPageList.querySelectorAll('.flyer-page-btn')) {
       btn.disabled = busy;
@@ -1740,6 +1759,454 @@ async function handleFlyerUrl() {
   await analyzeFlyerImageFromUrl(parsed.href);
 }
 
+
+function buildMealPrompt(candidates) {
+  const lines = candidates.map((c) => {
+    const parts = [`name: ${c.name}`];
+    if (c.qty) parts.push(`qty: ${c.qty}`);
+    if (c.store) parts.push(`store: ${c.store}`);
+    if (c.price) parts.push(`price: ${c.price}`);
+    return `- ${parts.join(', ')}`;
+  });
+  return [
+    'あなたは家庭の夕食献立を提案するアシスタントです。',
+    '次の特売候補だけを手がかりに、夜の食事（夕食）を提案してください。',
+    '夕食はちょうど3日分、各2人分です。',
+    '特売品は主材料でなくてもかまいません。副菜、汁物、添え、調味としての使い方でもよいです。',
+    '各日は、与えられた特売品を少なくとも1つ使ってください。特売品を1つも使わない日は作らないでください。',
+    '価格や合計金額を捏造しないでください。価格に触れる場合は、入力の price 文字列をそのまま写すだけにしてください。',
+    '足りない主食・調味料・買い足しは extras に入れてください。チラシにあるかのように装わないでください。',
+    'uses.name は入力の name をそのままコピーしてください。別の商品名に言い換えないでください。',
+    'uses.store は、その特売の store が入力にあるときだけ、その文字列をコピーしてください。無ければ空文字。',
+    'extras.store は店が分かるときだけ入れ、不明なら空文字にしてください。',
+    'steps は各日ちょうど3つにしてください。',
+    '出力は JSON のみ。マークダウンのコードフェンスは付けないでください。',
+    '形式: {"days":[{"title":"料理名","uses":[{"name":"特売品名","store":"店"}],"extras":[{"name":"買い足し","store":"店または空","why":"短い理由"}],"steps":["手順","手順","手順"]}]}',
+    '',
+    '【特売候補】',
+    lines.join('\n'),
+  ].join('\n');
+}
+
+function extractJsonObject(text) {
+  const cleaned = String(text || '')
+    .replace(/```(?:json)?\s*/gi, '')
+    .replace(/```/g, '')
+    .trim();
+  try {
+    const parsed = JSON.parse(cleaned);
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return parsed;
+  } catch {
+    /* fall through */
+  }
+  const match = cleaned.match(/\{[\s\S]*\}/);
+  if (match) {
+    const parsed = JSON.parse(match[0]);
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return parsed;
+  }
+  throw new Error('parse');
+}
+
+/**
+ * Text generateContent. No image parts.
+ * HTTP >= 500 is a hard failure (caller must not fall through to another model).
+ * @param {string} apiKey
+ * @param {string} model
+ * @param {string} promptText
+ * @param {boolean} withThinking
+ */
+async function callGeminiGenerate(apiKey, model, promptText, withThinking) {
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
+    model,
+  )}:generateContent`;
+
+  /** @type {Record<string, unknown>} */
+  const generationConfig = {
+    responseMimeType: 'application/json',
+  };
+  if (withThinking) {
+    generationConfig.thinkingConfig = { thinkingLevel: 'low' };
+  }
+
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-goog-api-key': apiKey,
+    },
+    body: JSON.stringify({
+      contents: [{ parts: [{ text: promptText }] }],
+      generationConfig,
+    }),
+  });
+
+  const bodyText = await res.text();
+  if (!res.ok) {
+    const mapped = mapGeminiError(res.status, bodyText);
+    const err = new Error(mapped || `HTTP ${res.status}`);
+    err.code = mapped === 'model_not_found' ? 'model_not_found' : 'http';
+    err.status = res.status;
+    err.body = bodyText;
+    if (!withThinking) err._retriedNoThinking = true;
+    throw err;
+  }
+
+  let data;
+  try {
+    data = JSON.parse(bodyText);
+  } catch {
+    const err = new Error('レスポンスの解析に失敗しました。');
+    err.code = 'parse';
+    throw err;
+  }
+
+  const textOut =
+    data?.candidates?.[0]?.content?.parts
+      ?.map((p) => p.text || '')
+      .join('') || '';
+
+  if (!textOut) {
+    const block = data?.promptFeedback?.blockReason;
+    const err = new Error(
+      block
+        ? `リクエストがブロックされました（${block}）。`
+        : 'AIから有効な応答がありませんでした。',
+    );
+    err.code = 'empty';
+    throw err;
+  }
+
+  return textOut;
+}
+
+/** Model-not-found / 404 / unsupported only. Never when HTTP >= 500. */
+function canFallbackGeminiModel(err) {
+  if (typeof err?.status === 'number' && err.status >= 500) return false;
+  return (
+    err?.code === 'model_not_found' ||
+    err?.status === 404 ||
+    (typeof err?.body === 'string' &&
+      /not found|NOT_FOUND|unsupported/i.test(err.body))
+  );
+}
+
+function isThinkingConfigRejection(err) {
+  if (typeof err?.status === 'number' && err.status >= 500) return false;
+  return (
+    typeof err?.body === 'string' &&
+    /thinking/i.test(err.body) &&
+    !err._retriedNoThinking
+  );
+}
+
+async function callGeminiJsonWithFallback(apiKey, promptText) {
+  let lastError = null;
+  for (let i = 0; i < GEMINI_MODELS.length; i++) {
+    const model = GEMINI_MODELS[i];
+    try {
+      const textOut = await callGeminiGenerate(apiKey, model, promptText, true);
+      return extractJsonObject(textOut);
+    } catch (err) {
+      lastError = err;
+      if (isThinkingConfigRejection(err)) {
+        try {
+          const textOut = await callGeminiGenerate(apiKey, model, promptText, false);
+          return extractJsonObject(textOut);
+        } catch (err2) {
+          lastError = err2;
+          if (canFallbackGeminiModel(err2) && i < GEMINI_MODELS.length - 1) {
+            continue;
+          }
+          throw err2;
+        }
+      }
+      if (canFallbackGeminiModel(err) && i < GEMINI_MODELS.length - 1) {
+        continue;
+      }
+      throw err;
+    }
+  }
+  throw lastError || new Error('Gemini呼び出しに失敗しました。');
+}
+
+/**
+ * @param {string} name
+ * @param {string} store
+ * @param {{ name: string, qty: string, store: string, price: string }[]} candidates
+ */
+function findSaleCandidate(name, store, candidates) {
+  const n = String(name || '').trim();
+  if (!n) return null;
+  const s = normalizeStore(store);
+  if (s) {
+    const exact = candidates.find(
+      (c) => c.name === n && normalizeStore(c.store) === s,
+    );
+    if (exact) return exact;
+  }
+  const sameName = candidates.filter((c) => c.name === n);
+  if (sameName.length === 1) return sameName[0];
+  if (sameName.length > 1 && !s) return sameName[0];
+  return null;
+}
+
+/**
+ * Keep only days that use at least one provided sale name (copied, not paraphrased).
+ * @param {unknown} parsed
+ * @param {{ name: string, qty: string, store: string, price: string }[]} candidates
+ */
+function normalizeMealDays(parsed, candidates) {
+  const rawDays = parsed && Array.isArray(parsed.days) ? parsed.days : [];
+  const saleNames = new Set(candidates.map((c) => c.name));
+  const days = [];
+  for (const raw of rawDays) {
+    if (!raw || typeof raw !== 'object') continue;
+    const title = String(raw.title || '').trim();
+    if (!title) continue;
+
+    const uses = [];
+    const seenUse = new Set();
+    const useList = Array.isArray(raw.uses) ? raw.uses : [];
+    for (const u of useList) {
+      const src = findSaleCandidate(u?.name, u?.store, candidates);
+      if (!src) continue;
+      const key = `${src.name}|${src.qty}|${src.store}`;
+      if (seenUse.has(key)) continue;
+      seenUse.add(key);
+      uses.push({ name: src.name, store: normalizeStore(src.store) });
+    }
+    if (!uses.length) continue;
+
+    const extras = [];
+    const seenExtra = new Set();
+    const extraList = Array.isArray(raw.extras) ? raw.extras : [];
+    for (const e of extraList) {
+      const name = String(e?.name || '').trim();
+      if (!name || saleNames.has(name)) continue;
+      const key = name.toLowerCase();
+      if (seenExtra.has(key)) continue;
+      seenExtra.add(key);
+      extras.push({
+        name,
+        store: normalizeStore(e?.store),
+        why: String(e?.why || '').trim(),
+      });
+    }
+
+    const steps = (Array.isArray(raw.steps) ? raw.steps : [])
+      .map((s) => String(s || '').trim())
+      .filter(Boolean)
+      .slice(0, 3);
+
+    days.push({ title, uses, extras, steps });
+    if (days.length >= 3) break;
+  }
+  return days;
+}
+
+/** If every use that day has the same non-empty store, return it. */
+function sharedUseStore(uses) {
+  if (!uses.length) return '';
+  const stores = uses.map((u) => normalizeStore(u.store));
+  if (stores.every((s) => s && s === stores[0])) return stores[0];
+  return '';
+}
+
+function resolveExtraStore(extra, day) {
+  const given = normalizeStore(extra.store);
+  if (given) return given;
+  return sharedUseStore(day.uses);
+}
+
+function friendlyMealError(err) {
+  const msg = friendlyAiError(err);
+  if (
+    msg === 'AI整理に失敗しました。' ||
+    msg === 'AI整理に失敗しました。しばらくしてから再試行してください。'
+  ) {
+    return '献立の作成に失敗しました。しばらくしてから再試行してください。';
+  }
+  return msg;
+}
+
+function renderMealPlan(days) {
+  els.flyerMealList.innerHTML = '';
+  els.flyerMeals.hidden = false;
+
+  days.forEach((day, index) => {
+    const card = document.createElement('article');
+    card.className = 'meal-day';
+
+    const title = document.createElement('h3');
+    title.className = 'meal-day-title';
+    title.textContent = `${index + 1}日目　${day.title}`;
+
+    const usesLabel = document.createElement('p');
+    usesLabel.className = 'meal-label';
+    usesLabel.textContent = '使う特売';
+    const usesList = document.createElement('ul');
+    usesList.className = 'meal-uses';
+    for (const u of day.uses) {
+      const li = document.createElement('li');
+      li.textContent = u.store ? `${u.name}（${u.store}）` : u.name;
+      usesList.appendChild(li);
+    }
+
+    const extrasLabel = document.createElement('p');
+    extrasLabel.className = 'meal-label';
+    extrasLabel.textContent = '買い足し';
+    const extrasList = document.createElement('ul');
+    extrasList.className = 'meal-extras';
+    if (!day.extras.length) {
+      const li = document.createElement('li');
+      li.className = 'meal-none';
+      li.textContent = 'なし';
+      extrasList.appendChild(li);
+    } else {
+      for (const extra of day.extras) {
+        const li = document.createElement('li');
+        const store = resolveExtraStore(extra, day);
+        let text = extra.name;
+        if (store) text += `（${store}）`;
+        if (extra.why) text += ` — ${extra.why}`;
+        li.textContent = text;
+        extrasList.appendChild(li);
+      }
+    }
+
+    const stepsLabel = document.createElement('p');
+    stepsLabel.className = 'meal-label';
+    stepsLabel.textContent = '手順';
+    const stepsList = document.createElement('ol');
+    stepsList.className = 'meal-steps';
+    for (const step of day.steps) {
+      const li = document.createElement('li');
+      li.textContent = step;
+      stepsList.appendChild(li);
+    }
+
+    const addBtn = document.createElement('button');
+    addBtn.type = 'button';
+    addBtn.className = 'meal-add-btn';
+    if (!day.extras.length) {
+      addBtn.disabled = true;
+      addBtn.textContent = '買い足しはありません';
+    } else {
+      addBtn.textContent = 'この日の買い足しをメモに追加';
+      addBtn.addEventListener('click', () => addDayExtras(day, addBtn));
+    }
+
+    card.append(
+      title,
+      usesLabel,
+      usesList,
+      extrasLabel,
+      extrasList,
+      stepsLabel,
+      stepsList,
+      addBtn,
+    );
+    els.flyerMealList.appendChild(card);
+  });
+}
+
+function addDayExtras(day, btn) {
+  if (btn.disabled) return;
+  const already = new Set(
+    (btn.dataset.addedNames || '').split('\n').filter(Boolean),
+  );
+  const pending = day.extras.filter((extra) => {
+    const name = String(extra.name || '').trim();
+    return name && !already.has(name);
+  });
+  if (!pending.length) {
+    btn.disabled = true;
+    btn.textContent = '追加済み';
+    return;
+  }
+  btn.disabled = true;
+  const added = [];
+  for (const extra of pending) {
+    const name = extra.name.trim();
+    addItem(name, '', resolveExtraStore(extra, day));
+    already.add(name);
+    added.push(name);
+  }
+  btn.dataset.addedNames = [...already].join('\n');
+  btn.textContent = '追加しました';
+  setFlyerStatus(`買い足し ${added.length} 件をメモに追加しました`);
+}
+
+function syncMealButtonBusy() {
+  if (!els.flyerMealBtn) return;
+  els.flyerMealBtn.disabled = flyerBusy || mealBusy;
+  els.flyerMealBtn.classList.toggle('busy', flyerBusy || mealBusy);
+}
+
+async function proposeMealsFromFlyer() {
+  if (mealBusy || flyerBusy) return;
+
+  const selected = collectCheckedFlyerCandidates();
+  if (!selected.length) {
+    setFlyerStatus('献立に使う特売を選択してください。', true);
+    return;
+  }
+
+  const apiKey = getApiKey();
+  if (!apiKey) {
+    setFlyerStatus('APIキーが未設定です。設定を開いてください。', true);
+    openSettings();
+    return;
+  }
+
+  const epoch = mealEpoch;
+  mealBusy = true;
+  syncMealButtonBusy();
+  setFlyerStatus('献立を考えています…');
+
+  try {
+    const parsed = await callGeminiJsonWithFallback(apiKey, buildMealPrompt(selected));
+    if (epoch !== mealEpoch) return;
+    const days = normalizeMealDays(parsed, selected);
+    if (!days.length) {
+      clearMealPlan();
+      // clearMealPlan bumps epoch; keep the message after that
+      setFlyerStatus('特売を使った献立を作れませんでした。もう一度試してください。', true);
+      return;
+    }
+    renderMealPlan(days);
+    if (days.length < 3) {
+      setFlyerStatus(
+        `${days.length}日分だけ作れました。特売の組み合わせを変えて再試行できます。`,
+      );
+    } else {
+      setFlyerStatus('3日分の献立です。買い足しだけメモに追加できます。');
+    }
+  } catch (err) {
+    if (epoch !== mealEpoch) return;
+    setFlyerStatus(friendlyMealError(err), true);
+  } finally {
+    mealBusy = false;
+    syncMealButtonBusy();
+  }
+}
+
+function collectCheckedFlyerCandidates() {
+  const rows = [...els.flyerCandidateList.querySelectorAll('.flyer-candidate')];
+  const result = [];
+  for (const row of rows) {
+    const checked = row.querySelector('.flyer-candidate-check')?.checked;
+    if (!checked) continue;
+    const name = row.querySelector('.flyer-cand-name')?.value.trim() || '';
+    if (!name) continue;
+    const qty = row.querySelector('.flyer-cand-qty')?.value.trim() || '';
+    const store = normalizeStore(row.querySelector('.flyer-cand-store')?.value || '');
+    const price = String(row.dataset.price || '').trim();
+    result.push({ name, qty, store, price });
+  }
+  return result;
+}
+
 function collectCheckedFlyerItems() {
   const rows = [...els.flyerCandidateList.querySelectorAll('.flyer-candidate')];
   const result = [];
@@ -1871,6 +2338,10 @@ els.flyerDeselectAll.addEventListener('click', () => {
 
 els.flyerAddBtn.addEventListener('click', () => {
   addSelectedFlyerItems();
+});
+
+els.flyerMealBtn.addEventListener('click', () => {
+  proposeMealsFromFlyer();
 });
 
 els.flyerClearBtn.addEventListener('click', () => {

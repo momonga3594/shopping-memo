@@ -178,7 +178,16 @@ function loadItems() {
 }
 
 function saveItems() {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(items));
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(items));
+    return true;
+  } catch {
+    // Keep the in-memory list (it is what is rendered) and tell the user.
+    const msg = '端末に保存できませんでした（容量不足など）。リストは表示中ですが、再読み込みすると失われる可能性があります。';
+    setStatus(msg, true);
+    if (typeof setFlyerStatus === 'function' && activeTab === 'flyer') setFlyerStatus(msg, true);
+    return false;
+  }
 }
 
 function getApiKey() {
@@ -1230,8 +1239,15 @@ function renderFlyerCandidates(candidates) {
       fields.appendChild(priceEl);
     }
 
-    check.addEventListener('change', updateFlyerAddButtonState);
-    nameInput.addEventListener('input', updateFlyerAddButtonState);
+    const onCandidateChanged = () => {
+      // Inputs to the meal plan changed: drop shown/in-flight meals (epoch guard).
+      clearMealPlan();
+      updateFlyerAddButtonState();
+    };
+    check.addEventListener('change', onCandidateChanged);
+    nameInput.addEventListener('input', onCandidateChanged);
+    qtyInput.addEventListener('input', onCandidateChanged);
+    storeInput.addEventListener('input', onCandidateChanged);
 
     li.append(check, fields);
     els.flyerCandidateList.appendChild(li);
@@ -1260,7 +1276,8 @@ function setFlyerBusy(busy) {
   els.flyerClearBtn.disabled = busy;
   els.tabMemo.disabled = busy;
   els.tabFlyer.disabled = busy;
-  els.flyerAddBtn.disabled = busy || els.flyerAddBtn.disabled;
+  if (busy) els.flyerAddBtn.disabled = true;
+  else updateFlyerAddButtonState();
   if (els.flyerMealBtn) {
     els.flyerMealBtn.disabled = busy || mealBusy;
     els.flyerMealBtn.classList.toggle('busy', busy || mealBusy);
@@ -2126,15 +2143,33 @@ function addDayExtras(day, btn) {
   }
   btn.disabled = true;
   const added = [];
+  let skipped = 0;
   for (const extra of pending) {
     const name = extra.name.trim();
-    addItem(name, '', resolveExtraStore(extra, day));
+    const store = normalizeStore(resolveExtraStore(extra, day));
     already.add(name);
+    const key = name.toLowerCase();
+    const exists = items.some(
+      (i) =>
+        !i.done &&
+        i.name.toLowerCase() === key &&
+        (i.store || '') === store,
+    );
+    if (exists) {
+      skipped += 1;
+      continue;
+    }
+    items.unshift({ id: uid(), name, qty: '', store, done: false });
     added.push(name);
   }
+  if (added.length) {
+    saveItems();
+    render();
+  }
   btn.dataset.addedNames = [...already].join('\n');
-  btn.textContent = '追加しました';
-  setFlyerStatus(`買い足し ${added.length} 件をメモに追加しました`);
+  btn.textContent = added.length ? '追加しました' : '追加済み';
+  const skipText = skipped ? `（${skipped} 件はメモにあるためスキップ）` : '';
+  setFlyerStatus(`買い足し ${added.length} 件をメモに追加しました${skipText}`);
 }
 
 function syncMealButtonBusy() {

@@ -697,7 +697,8 @@ async function callGemini(apiKey, model, userText) {
       contents: [{ parts: [{ text: buildOrganizePrompt(userText) }] }],
       generationConfig: {
         responseMimeType: 'application/json',
-        thinkingConfig: { thinkingLevel: 'low' },
+        // Text-only list cleanup needs little reasoning; minimal is faster.
+        thinkingConfig: { thinkingLevel: 'minimal' },
       },
     }),
   });
@@ -1458,7 +1459,21 @@ function isResolvableFlyerViewerUrl(parsed) {
  * @param {string} imageUrl
  * @returns {Promise<Blob>}
  */
-async function fetchFlyerImageBlob(imageUrl) {
+/** Thumbnail and page analysis fetch the same image; share one in-flight/finished fetch. */
+const flyerBlobCache = new Map();
+function fetchFlyerImageBlob(imageUrl) {
+  const key = `${getFlyerProxyUrl()}|${imageUrl}`;
+  let p = flyerBlobCache.get(key);
+  if (!p) {
+    p = fetchFlyerImageBlobUncached(imageUrl);
+    flyerBlobCache.set(key, p);
+    p.catch(() => flyerBlobCache.delete(key));
+    if (flyerBlobCache.size > 40) flyerBlobCache.delete(flyerBlobCache.keys().next().value);
+  }
+  return p;
+}
+
+async function fetchFlyerImageBlobUncached(imageUrl) {
   const proxyBase = getFlyerProxyUrl();
   if (proxyBase) {
     let proxyEndpoint;
@@ -1797,6 +1812,7 @@ function buildMealPrompt(candidates) {
     'uses.store は、その特売の store が入力にあるときだけ、その文字列をコピーしてください。無ければ空文字。',
     'extras.store は店が分かるときだけ入れ、不明なら空文字にしてください。',
     'steps は各日ちょうど3つにしてください。',
+    '簡潔に: title は20文字以内、why は15文字以内、各 step は30文字以内。',
     '出力は JSON のみ。マークダウンのコードフェンスは付けないでください。',
     '形式: {"days":[{"title":"料理名","uses":[{"name":"特売品名","store":"店"}],"extras":[{"name":"買い足し","store":"店または空","why":"短い理由"}],"steps":["手順","手順","手順"]}]}',
     '',
@@ -1842,7 +1858,8 @@ async function callGeminiGenerate(apiKey, model, promptText, withThinking) {
     responseMimeType: 'application/json',
   };
   if (withThinking) {
-    generationConfig.thinkingConfig = { thinkingLevel: 'low' };
+    // Meal plan: minimal thinking for latency; rejection → retried without thinkingConfig.
+    generationConfig.thinkingConfig = { thinkingLevel: 'minimal' };
   }
 
   const res = await fetch(url, {

@@ -41,7 +41,7 @@ const KURASHIRU_UUID_RE =
   '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}';
 
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     const origin = request.headers.get('Origin') || '';
     const allowed = getAllowedOrigins(env);
 
@@ -68,13 +68,45 @@ export default {
       return jsonError(400, 'bad_request', err.message || 'url または resolve パラメータが必要です。', origin, allowed);
     }
 
+    // Edge cache (per colo). Keyed only on the validated target; auth/CORS checks
+    // above still run on every request and CORS headers are applied per response.
+    const cache = typeof caches !== 'undefined' ? caches.default : null;
+    const cacheKey = new Request(
+      `https://flyer-proxy-cache.internal/${mode}?t=${encodeURIComponent(targetRaw)}`,
+    );
+    if (cache) {
+      try {
+        const hit = await cache.match(cacheKey);
+        if (hit) {
+          const headers = new Headers(hit.headers);
+          applyCors(headers, origin, allowed);
+          headers.set('X-Proxy-Cache', 'HIT');
+          return new Response(hit.body, { status: 200, headers });
+        }
+      } catch {
+        /* cache miss on error */
+      }
+    }
+    const putCache = (resp, ttl) => {
+      if (!cache || !ctx) return resp;
+      const h = new Headers();
+      h.set('Content-Type', resp.headers.get('Content-Type') || 'application/octet-stream');
+      h.set('Cache-Control', `public, max-age=${ttl}`);
+      if (mode === 'image') h.set('X-Content-Type-Options', 'nosniff');
+      const [a, b] = resp.body.tee();
+      ctx.waitUntil(cache.put(cacheKey, new Response(b, { status: 200, headers: h })).catch(() => {}));
+      const out = new Response(a, { status: 200, headers: resp.headers });
+      out.headers.set('X-Proxy-Cache', 'MISS');
+      return out;
+    };
+
     if (mode === 'resolve') {
       try {
         const result = await resolveViewerUrl(targetRaw);
         const headers = new Headers({ 'Content-Type': 'application/json; charset=utf-8' });
         headers.set('Cache-Control', 'public, max-age=120');
         applyCors(headers, origin, allowed);
-        return new Response(JSON.stringify(result), { status: 200, headers });
+        return putCache(new Response(JSON.stringify(result), { status: 200, headers }), 300);
       } catch (err) {
         const code = err.code || 'resolve_failed';
         const status = err.status || 502;
@@ -89,7 +121,7 @@ export default {
       headers.set('Cache-Control', 'public, max-age=300');
       headers.set('X-Content-Type-Options', 'nosniff');
       applyCors(headers, origin, allowed);
-      return new Response(result.body, { status: 200, headers });
+      return putCache(new Response(result.body, { status: 200, headers }), 600);
     } catch (err) {
       const code = err.code || 'fetch_failed';
       const status = err.status || 502;

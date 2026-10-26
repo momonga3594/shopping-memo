@@ -65,22 +65,27 @@ CORS で直接取得できない画像URL向けに、Cloudflare Worker の小さ
 
 1. ⚙️設定を開く
 2. 「チラシ画像プロキシ URL」に上記 URL をそのまま貼る（末尾スラッシュなし）
-3. 「プロキシ用シークレット」（プロキシシークレット）:
-   - **空のまま** = 認証なし（**現状の本番はこの状態**）
-   - Worker に `PROXY_SECRET` を設定した場合は、**同じ値**をここに保存する
+3. 「プロキシ用シークレット（任意）」:
+   - **本番 Worker には `PROXY_SECRET` を設定済み**（2026-10-27〜）。ここに**同じ値**を入力しないと、店舗プリセット・チラシURL解析・画像取得・サムネイルがすべて 401 になります
+   - 値はリポジトリには置いていません。管理者から受け取ってください
+   - 未入力／不一致のときはチラシタブに「⚙️設定の「プロキシ用シークレット」に…入力して保存してください」と表示されます
 4. 「保存」
 
-#### Worker 側でシークレットを付ける（推奨・任意）
+#### Worker 側のシークレット（PROXY_SECRET）
 
-Worker URL が公開されている場合は設定を推奨します。未設定でも動作します。
+- アプリはすべてのプロキシ呼び出し（`?resolve=` / `?url=`、サムネイル含む）を `fetch` で行い、`X-Proxy-Secret` ヘッダーで送ります（`<img src>` でプロキシを直接読むことはありません）
+- Worker はシークレット照合を**エッジキャッシュ参照より前**に行うため、キャッシュ済みの応答も未認証では返りません
+- CORS の許可オリジン・プライベートIP拒否などのチェックはそのまま有効です
+
+変更（ローテーション）する場合:
 
 ```bash
 cd workers/flyer-proxy
-npx wrangler secret put PROXY_SECRET
-# プロンプトで長いランダム文字列を入力
+openssl rand -hex 32 > /path/to/secret.txt   # リポジトリ外に保存
+npx wrangler secret put PROXY_SECRET < /path/to/secret.txt
 ```
 
-アプリ設定の「プロキシ用シークレット」にも同じ文字列を保存してください。片方だけだと画像取得が 401 になります。
+変更後はアプリ設定の「プロキシ用シークレット」も同じ値に更新してください。片方だけだと 401 になります。
 
 新規デプロイや再デプロイ: `workers/flyer-proxy` で `npx wrangler deploy`（詳細は同ディレクトリの README）。
 
@@ -91,7 +96,7 @@ npx wrangler secret put PROXY_SECRET
 
 このアプリは GitHub Pages の静的サイトのため、Gemini API を **ブラウザから直接** 呼び出します。API キーは端末にアクセスできる人なら DevTools 等で見られる可能性があります。可能であれば Google AI Studio 側でキーの利用制限（HTTP リファラ制限など）を設定してください。共有端末では使い終わったら設定から「クリア」してください。
 
-利用モデル（優先順）: `gemini-3.8-flash` → `gemini-3.7-flash` → `gemini-2.0-flash`
+利用モデル（優先順、2026-10-27 時点で無料枠・画像入力・JSON出力対応）: `gemini-3.8-flash` → `gemini-3.6-flash` → `gemini-3.5-flash-lite`（thinking は 3.8 Flash が low、3.6 Flash / 3.5 Flash-Lite はテキスト処理で minimal、チラシ画像は low）
 
 ## 必要な環境
 

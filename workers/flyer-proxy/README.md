@@ -31,7 +31,7 @@ npx wrangler secret put PROXY_SECRET
 1. 買い物メモ → ⚙️設定
 2. 「チラシ画像プロキシ URL」に Worker のベース URL を貼る（末尾スラッシュなしで可）  
    本番例: `https://shopping-memo-flyer-proxy.momonga3594.workers.dev`
-3. 「プロキシ用シークレット」: Worker に `PROXY_SECRET` を付けたときだけ同じ値を保存。空 = 認証なし
+3. 「プロキシ用シークレット」: 本番 Worker は `PROXY_SECRET` 設定済み。アプリにも同じ値を保存（未入力・不一致は 401）
 4. 「保存」
 
 チラシタブの「URLから読み込み」は、プロキシが設定されていれば  

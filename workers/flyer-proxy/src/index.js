@@ -54,8 +54,9 @@ export default {
     }
 
     if (env.PROXY_SECRET) {
+      // Checked before any cache lookup so cached responses are never served unauthenticated.
       const provided = request.headers.get('X-Proxy-Secret') || '';
-      if (provided !== env.PROXY_SECRET) {
+      if (!secretsEqual(provided, String(env.PROXY_SECRET))) {
         return jsonError(401, 'unauthorized', 'プロキシ認証に失敗しました。', origin, allowed);
       }
     }
@@ -1303,4 +1304,20 @@ function sniffImageMime(bytes) {
     }
   }
   return null;
+}
+
+/** Constant-time string compare for the proxy secret. */
+function secretsEqual(a, b) {
+  const enc = new TextEncoder();
+  const x = enc.encode(a);
+  const y = enc.encode(b);
+  if (x.byteLength !== y.byteLength) {
+    // still do a compare to keep timing similar
+    if (crypto?.subtle?.timingSafeEqual) crypto.subtle.timingSafeEqual(y, y);
+    return false;
+  }
+  if (crypto?.subtle?.timingSafeEqual) return crypto.subtle.timingSafeEqual(x, y);
+  let diff = 0;
+  for (let i = 0; i < x.length; i++) diff |= x[i] ^ y[i];
+  return diff === 0;
 }

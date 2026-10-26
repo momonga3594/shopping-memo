@@ -21,12 +21,27 @@ const FLYER_PRESETS = [
   },
 ];
 
-/** Primary + fallbacks if a model name is unavailable */
+/**
+ * Primary + fallbacks if a model name is unavailable (free tier, text+image in, JSON out).
+ * Checked 2026-10-27 against ai.google.dev/gemini-api/docs/models, /pricing, /deprecations.
+ */
 const GEMINI_MODELS = [
   'gemini-3.8-flash',
-  'gemini-3.7-flash',
-  'gemini-2.0-flash',
+  'gemini-3.6-flash',
+  'gemini-3.5-flash-lite',
 ];
+
+/** Models whose thinking_level supports 'minimal' (gemini-3.8-flash: low/medium/high only). */
+const GEMINI_MINIMAL_THINKING = new Set(['gemini-3.6-flash', 'gemini-3.5-flash-lite']);
+
+/**
+ * @param {string} model
+ * @param {'text' | 'vision'} kind text = organize/meal (as light as possible), vision = low
+ */
+function thinkingLevelFor(model, kind) {
+  if (kind === 'vision') return 'low';
+  return GEMINI_MINIMAL_THINKING.has(model) ? 'minimal' : 'low';
+}
 
 /** @typedef {{ id: string, name: string, qty: string, store: string, done: boolean }} Item */
 
@@ -698,7 +713,7 @@ async function callGemini(apiKey, model, userText) {
       generationConfig: {
         responseMimeType: 'application/json',
         // Text-only list cleanup needs little reasoning; minimal is faster.
-        thinkingConfig: { thinkingLevel: 'minimal' },
+        thinkingConfig: { thinkingLevel: thinkingLevelFor(model, 'text') },
       },
     }),
   });
@@ -1061,7 +1076,7 @@ async function callGeminiVision(apiKey, model, image, withThinking = true) {
     responseMimeType: 'application/json',
   };
   if (withThinking) {
-    generationConfig.thinkingConfig = { thinkingLevel: 'low' };
+    generationConfig.thinkingConfig = { thinkingLevel: thinkingLevelFor(model, 'vision') };
   }
 
   const res = await fetch(url, {
@@ -1369,6 +1384,9 @@ function buildFlyerProxyEndpoint(mode, target) {
   return `${u.origin}${path}/?${param}=${encodeURIComponent(target)}`;
 }
 
+const PROXY_AUTH_ERROR_MESSAGE =
+  'チラシ画像プロキシの認証に失敗しました。⚙️設定の「プロキシ用シークレット」に、Worker に設定した PROXY_SECRET と同じ値を入力して保存してください。';
+
 function proxyRequestHeaders() {
   /** @type {Record<string, string>} */
   const headers = {};
@@ -1507,7 +1525,7 @@ async function fetchFlyerImageBlobUncached(imageUrl) {
       }
       if (res.status === 401) {
         throw new Error(
-          'プロキシ認証に失敗しました。設定のシークレットを確認してください。',
+          PROXY_AUTH_ERROR_MESSAGE,
         );
       }
       throw new Error(
@@ -1602,7 +1620,7 @@ async function resolveFlyerViewerViaProxy(viewerUrl) {
   if (!res.ok) {
     if (res.status === 401) {
       throw new Error(
-        'プロキシ認証に失敗しました。設定のシークレットを確認してください。',
+        PROXY_AUTH_ERROR_MESSAGE,
       );
     }
     const detail =
@@ -1859,7 +1877,7 @@ async function callGeminiGenerate(apiKey, model, promptText, withThinking) {
   };
   if (withThinking) {
     // Meal plan: minimal thinking for latency; rejection → retried without thinkingConfig.
-    generationConfig.thinkingConfig = { thinkingLevel: 'minimal' };
+    generationConfig.thinkingConfig = { thinkingLevel: thinkingLevelFor(model, 'text') };
   }
 
   const res = await fetch(url, {

@@ -44,7 +44,7 @@ Cloudflare Cache API（colo 単位）で、resolve の結果を 5 分、画像�
 3. 「プロキシ用シークレット」: 本番 Worker は `PROXY_SECRET` 設定済み。アプリにも同じ値を保存（未入力・不一致は 401）
 4. 「保存」
 
-チラシタブの「URLから読み込み」は、プロキシが設定されていれば  
+チラシタブの「ほかの店・URLから読み込む」と店舗ボタンは、プロキシが設定されていれば  
 - 画像直リンク: `GET {proxy}/?url={encodeURIComponent(imageUrl)}`
 - ビューア／店舗 resolve: `GET {proxy}/?resolve={encodeURIComponent(viewerUrl)}`  
   （イオン店舗・ビューア / ウオロク店舗チラシ / クラシル / 原信店舗）  

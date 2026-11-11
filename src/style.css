@@ -258,7 +258,12 @@ body {
   align-items: baseline;
   column-gap: 8px;
   row-gap: 2px;
+  align-self: stretch;
+  align-content: center;
   padding: 6px 0;
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .item-name {
@@ -401,6 +406,32 @@ body {
   display: flex;
   flex-direction: column;
   gap: 10px;
+}
+
+/* Collapsed composer: only the text box + mic until the user starts typing / speaking. */
+.composer:not(.expanded) .meta-row,
+.composer:not(.expanded) .action-row {
+  display: none;
+}
+
+.composer.expanded .item-input {
+  min-height: 4.4em;
+}
+
+.composer:not(.expanded) .item-input {
+  height: var(--tap);
+  overflow: hidden;
+}
+
+.composer-store-hint {
+  margin: 6px 2px 0;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.composer.expanded .composer-store-hint,
+.composer-store-hint:empty {
+  display: none;
 }
 
 .input-row {
@@ -745,11 +776,6 @@ body {
     font-size: 1.15rem;
   }
 
-  .item {
-    min-height: 52px;
-    padding: 8px 10px;
-  }
-
   .composer {
     padding-top: 6px;
     padding-bottom: 8px;
@@ -945,6 +971,46 @@ body {
 .flyer-preset-btn:disabled {
   opacity: 0.55;
   cursor: wait;
+}
+
+.flyer-more {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.flyer-more-summary {
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 4px;
+  color: var(--primary-dark);
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  list-style: none;
+}
+
+.flyer-more-summary::-webkit-details-marker {
+  display: none;
+}
+
+.flyer-more-summary::before {
+  content: '▸';
+  transition: transform 0.15s;
+}
+
+.flyer-more[open] > .flyer-more-summary::before {
+  transform: rotate(90deg);
+}
+
+.flyer-more > .flyer-url-row {
+  margin-top: 4px;
+}
+
+.flyer-more > .flyer-help {
+  margin-top: 8px;
 }
 
 .flyer-url-row {
@@ -1256,7 +1322,12 @@ body {
   font-weight: 600;
 }
 
+/* 追加／クリア only appear once something is loaded (preview, page list or candidates). */
 .flyer-actions {
+  display: none;
+}
+
+.flyer-panel:has(#flyer-review:not([hidden]), #flyer-preview-wrap:not([hidden]), #flyer-page-picker:not([hidden])) .flyer-actions {
   display: flex;
   flex-direction: column;
   gap: 8px;

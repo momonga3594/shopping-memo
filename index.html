@@ -60,7 +60,7 @@
             </p>
           </main>
 
-          <footer class="composer" role="region" aria-label="追加パネル">
+          <footer id="composer" class="composer" role="region" aria-label="追加パネル">
             <p id="voice-status" class="voice-status" role="status" aria-live="polite"></p>
             <p id="voice-note" class="voice-note" hidden></p>
             <form id="add-form" class="add-form" autocomplete="off">
@@ -68,8 +68,8 @@
                 <textarea
                   id="item-input"
                   class="item-input"
-                  placeholder="買うものを入力…（「、」や改行で複数）"
-                  rows="2"
+                  placeholder="買うもの（「、」で複数）"
+                  rows="1"
                   maxlength="500"
                   enterkeyhint="done"
                   aria-label="買うもの"
@@ -118,6 +118,7 @@
                 </button>
               </div>
             </form>
+            <p id="composer-store-hint" class="composer-store-hint"></p>
           </footer>
         </section>
 
@@ -152,25 +153,27 @@
                 </button>
               </div>
 
-              <div class="flyer-url-row">
-                <input
-                  id="flyer-url-input"
-                  type="url"
-                  class="flyer-url-input"
-                  placeholder="https://… 画像URL / イオン・ウオロク・クラシル・原信"
-                  inputmode="url"
-                  autocomplete="off"
-                  spellcheck="false"
-                  aria-label="チラシ画像またはビューアのURL"
-                />
-                <button type="button" id="flyer-url-btn" class="flyer-url-btn">
-                  URLから読み込み
-                </button>
-              </div>
-
-              <p class="flyer-help">
-                上のボタンでウオロク神道寺・イオンとやの店・原信黒崎を読み込めます。そのほか、イオンのチラシビューア、ウオロク店舗チラシ、クラシルのウィジェット／店舗URL、画像の直リンクも貼れます。設定で画像プロキシURLを保存すると取得しやすくなります。取れない場合はスクショ／保存して写真から追加してください。
-              </p>
+              <details class="flyer-more">
+                <summary class="flyer-more-summary">ほかの店・URLから読み込む</summary>
+                <div class="flyer-url-row">
+                  <input
+                    id="flyer-url-input"
+                    type="url"
+                    class="flyer-url-input"
+                    placeholder="https://… 画像URL / 店舗ページ"
+                    inputmode="url"
+                    autocomplete="off"
+                    spellcheck="false"
+                    aria-label="チラシ画像またはビューアのURL"
+                  />
+                  <button type="button" id="flyer-url-btn" class="flyer-url-btn">
+                    読み込み
+                  </button>
+                </div>
+                <p class="flyer-help">
+                  イオン・ウオロク・原信の店舗ページ、イオンのチラシビューア、クラシルのウィジェット／店舗URL、画像の直リンクを貼れます。取れないときはスクショを撮って「写真・ギャラリー」から選んでください。
+                </p>
+              </details>
 
               <div id="flyer-page-picker" class="flyer-page-picker" hidden>
                 <p class="flyer-page-picker-title">ページを選んでください</p>

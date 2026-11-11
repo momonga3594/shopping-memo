@@ -384,6 +384,11 @@ function createItemElement(item) {
 
   const body = document.createElement('div');
   body.className = 'item-body';
+  // Tapping the name area also toggles (the round button stays for screen readers).
+  body.addEventListener('click', (e) => {
+    if (li.querySelector('.store-edit') || e.target.closest('input, button')) return;
+    toggleItem(item.id);
+  });
   const name = document.createElement('span');
   name.className = 'item-name';
   name.textContent = item.name;
@@ -622,6 +627,31 @@ function clearDone() {
   offerUndo(`完了済み ${count} 件を消しました`, before);
 }
 
+/* ---------- Composer: collapsed to one row until used ---------- */
+
+const composerEl = document.getElementById('composer');
+const composerStoreHint = document.getElementById('composer-store-hint');
+
+/** Expanded while focused, while text is in the box, or while AI / voice is working. */
+function updateComposer() {
+  const focused = composerEl.contains(document.activeElement);
+  const expanded = focused || Boolean(els.input.value.trim()) || aiBusy || listening;
+  composerEl.classList.toggle('expanded', expanded);
+  const store = normalizeStore(els.store.value);
+  // The store field is kept between adds, so say so while it is hidden.
+  composerStoreHint.textContent = store ? `📍 次の追加は「${store}」に入ります` : '';
+  if (undoSnapshot) positionUndoToast();
+}
+
+composerEl.addEventListener('focusin', updateComposer);
+composerEl.addEventListener('focusout', () => {
+  // Let a tap on 追加 / AIで整理 land before collapsing.
+  setTimeout(updateComposer, 150);
+});
+els.input.addEventListener('input', updateComposer);
+els.store.addEventListener('input', updateComposer);
+updateComposer();
+
 /**
  * Split the composer text into item names on newlines and Japanese/ASCII commas.
  * Spaces are kept (e.g. 「ハーゲンダッツ バニラ」 stays one item).
@@ -708,6 +738,10 @@ els.saveKeyBtn.addEventListener('click', () => {
 });
 
 els.clearKeyBtn.addEventListener('click', () => {
+  const ok = window.confirm(
+    'Gemini APIキーとプロキシ用シークレットをこの端末から削除し、プロキシURLを標準に戻します。よろしいですか？',
+  );
+  if (!ok) return;
   setApiKey('');
   resetFlyerProxyUrl();
   setFlyerProxySecret('');
@@ -991,6 +1025,7 @@ async function organizeWithAi() {
     aiBusy = false;
     els.aiBtn.disabled = false;
     els.aiBtn.classList.remove('busy');
+    updateComposer();
   }
 }
 
@@ -2537,6 +2572,7 @@ function initVoice() {
     els.mic.classList.add('listening');
     els.mic.setAttribute('aria-pressed', 'true');
     setStatus('聞いています… 話してください');
+    updateComposer();
   };
 
   recognition.onresult = (event) => {
@@ -2545,6 +2581,7 @@ function initVoice() {
       transcript += event.results[i][0].transcript;
     }
     els.input.value = transcript.trim();
+    updateComposer();
     if (event.results[event.results.length - 1].isFinal) {
       setStatus(
         '認識しました。「追加」または「AIで整理」を押してください',
@@ -2575,6 +2612,7 @@ function initVoice() {
     listening = false;
     els.mic.classList.remove('listening');
     els.mic.setAttribute('aria-pressed', 'false');
+    setTimeout(updateComposer, 0);
     if (els.voiceStatus.textContent === '聞いています… 話してください') {
       setStatus('');
     }

@@ -68,7 +68,7 @@
                 <textarea
                   id="item-input"
                   class="item-input"
-                  placeholder="買うものを入力…（複数でもOK）"
+                  placeholder="買うものを入力…（「、」や改行で複数）"
                   rows="2"
                   maxlength="500"
                   enterkeyhint="done"
@@ -225,6 +225,11 @@
         </section>
       </div>
 
+      <div id="undo-toast" class="undo-toast" role="status" aria-live="polite" hidden>
+        <span id="undo-message" class="undo-message"></span>
+        <button type="button" id="undo-btn" class="undo-btn">元に戻す</button>
+      </div>
+
       <nav class="tab-bar" role="tablist" aria-label="メインメニュー">
         <button
           type="button"
@@ -283,7 +288,7 @@
           にだけ保存され、サーバーには送られません。
         </p>
 
-        <label for="proxy-url-input" class="settings-label">チラシ画像プロキシ URL（任意）</label>
+        <label for="proxy-url-input" class="settings-label">チラシ画像プロキシ URL</label>
         <input
           id="proxy-url-input"
           type="url"
@@ -303,10 +308,7 @@
           spellcheck="false"
         />
         <p class="settings-help">
-          CORS で直接取れない画像URL向けです。自分で Cloudflare Worker
-          をデプロイし、そのベースURLを保存してください。手順はリポジトリの
-          <code>workers/flyer-proxy/README.md</code>
-          を参照。未設定のときはブラウザ直接取得（失敗しやすい）にフォールバックします。
+          店舗ボタンやチラシURLの読み込みに使います。URL は最初から標準のものが入っているので、ふだんはシークレットだけ入れて保存してください（管理者から受け取った値）。URL を空にして保存すると、ブラウザから直接取得します（失敗しやすい）。
         </p>
 
         <div class="settings-actions">

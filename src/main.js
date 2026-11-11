@@ -4,6 +4,7 @@ const FLYER_PROXY_STORAGE = 'shopping-memo-flyer-proxy';
 const FLYER_PROXY_SECRET_STORAGE = 'shopping-memo-flyer-proxy-secret';
 const TAB_STORAGE_KEY = 'shopping-memo-active-tab';
 const UNSET_STORE_LABEL = '未設定';
+const DEFAULT_FLYER_PROXY_URL = 'https://shopping-memo-flyer-proxy.momonga3594.workers.dev';
 
 /** Built-in store flyer pages (resolved by the flyer proxy). */
 const FLYER_PRESETS = [
@@ -109,6 +110,9 @@ let flyerImagePayload = null;
 let flyerPreviewUrl = null;
 /** @type {'memo' | 'flyer'} */
 let activeTab = loadActiveTab();
+/** List before the last delete / clear-done, while 「元に戻す」 is offered. @type {Item[] | null} */
+let undoSnapshot = null;
+let undoTimer = 0;
 
 function loadActiveTab() {
   try {
@@ -152,6 +156,8 @@ function setActiveTab(tab) {
   els.tabMemo.tabIndex = isMemo ? 0 : -1;
   els.tabFlyer.tabIndex = isMemo ? -1 : 0;
 
+  if (!isMemo && undoSnapshot) hideUndo();
+
   // Stop listening mic when leaving memo
   if (!isMemo && listening && recognition) {
     try {
@@ -193,6 +199,8 @@ function loadItems() {
 }
 
 function saveItems() {
+  // Any other change ends the undo window, so undo never rolls back a later edit.
+  if (undoSnapshot) hideUndo();
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(items));
     return true;
@@ -222,21 +230,27 @@ function setApiKey(key) {
   }
 }
 
+/**
+ * Never saved → the production proxy (its URL is public; access needs PROXY_SECRET).
+ * Saved as '' → the user explicitly turned the proxy off.
+ */
 function getFlyerProxyUrl() {
   try {
-    return (localStorage.getItem(FLYER_PROXY_STORAGE) || '').trim().replace(/\/$/, '');
+    const raw = localStorage.getItem(FLYER_PROXY_STORAGE);
+    if (raw === null) return DEFAULT_FLYER_PROXY_URL;
+    return raw.trim().replace(/\/$/, '');
   } catch {
-    return '';
+    return DEFAULT_FLYER_PROXY_URL;
   }
 }
 
 function setFlyerProxyUrl(url) {
   const trimmed = (url || '').trim().replace(/\/$/, '');
-  if (trimmed) {
-    localStorage.setItem(FLYER_PROXY_STORAGE, trimmed);
-  } else {
-    localStorage.removeItem(FLYER_PROXY_STORAGE);
-  }
+  localStorage.setItem(FLYER_PROXY_STORAGE, trimmed);
+}
+
+function resetFlyerProxyUrl() {
+  localStorage.removeItem(FLYER_PROXY_STORAGE);
 }
 
 function getFlyerProxySecret() {
@@ -345,7 +359,9 @@ function render() {
     header.append(title, badge);
     els.list.appendChild(header);
 
-    for (const item of group.items) {
+    // Remaining items first, done items sink to the bottom of their group (stable order).
+    const ordered = [...group.items.filter((i) => !i.done), ...group.items.filter((i) => i.done)];
+    for (const item of ordered) {
       els.list.appendChild(createItemElement(item));
     }
   }
@@ -379,12 +395,12 @@ function createItemElement(item) {
     body.appendChild(qty);
   }
 
+  // The group header already shows the store, so the row only has a compact pin button.
   const storeBtn = document.createElement('button');
   storeBtn.type = 'button';
   storeBtn.className = `item-store${item.store ? '' : ' unset'}`;
-  storeBtn.textContent = item.store
-    ? `📍 ${item.store}`
-    : `📍 ${UNSET_STORE_LABEL}`;
+  storeBtn.textContent = '📍';
+  storeBtn.title = item.store ? `購入先: ${item.store}（タップで変更）` : '購入先を設定';
   storeBtn.setAttribute(
     'aria-label',
     item.store
@@ -395,7 +411,6 @@ function createItemElement(item) {
     e.stopPropagation();
     beginStoreEdit(li, item);
   });
-  body.appendChild(storeBtn);
 
   const del = document.createElement('button');
   del.type = 'button';
@@ -404,7 +419,7 @@ function createItemElement(item) {
   del.textContent = '×';
   del.addEventListener('click', () => deleteItem(item.id));
 
-  li.append(toggle, body, del);
+  li.append(toggle, body, storeBtn, del);
   return li;
 }
 
@@ -417,7 +432,7 @@ function beginStoreEdit(li, item) {
   }
 
   const body = li.querySelector('.item-body');
-  const storeBtn = body?.querySelector('.item-store');
+  const storeBtn = li.querySelector('.item-store');
   if (!body || !storeBtn) return;
 
   storeBtn.hidden = true;
@@ -538,21 +553,97 @@ function toggleItem(id) {
   render();
 }
 
+/* ---------- Undo (delete / clear done) ---------- */
+
+const UNDO_MS = 5000;
+const undoEls = {
+  toast: document.getElementById('undo-toast'),
+  message: document.getElementById('undo-message'),
+  button: document.getElementById('undo-btn'),
+};
+function hideUndo() {
+  clearTimeout(undoTimer);
+  undoSnapshot = null;
+  undoEls.toast.hidden = true;
+}
+
+/** Keep the toast just above the composer (its height changes with status lines). */
+function positionUndoToast() {
+  const composer = els.panelMemo.querySelector('.composer');
+  const top = composer?.getBoundingClientRect().top;
+  const bottom = top ? Math.max(8, window.innerHeight - top + 8) : 96;
+  undoEls.toast.style.bottom = `${bottom}px`;
+}
+
+/**
+ * @param {string} message
+ * @param {Item[]} before list as it was before the destructive action
+ */
+function offerUndo(message, before) {
+  clearTimeout(undoTimer);
+  undoSnapshot = before;
+  setStatus('');
+  undoEls.message.textContent = message;
+  undoEls.toast.hidden = false;
+  positionUndoToast();
+  undoTimer = setTimeout(hideUndo, UNDO_MS);
+}
+
+undoEls.button.addEventListener('click', () => {
+  if (!undoSnapshot) return;
+  items = undoSnapshot;
+  hideUndo();
+  saveItems();
+  setStatus('元に戻しました');
+  render();
+});
+
+function snapshotItems() {
+  return items.map((i) => ({ ...i }));
+}
+
 function deleteItem(id) {
+  const target = items.find((i) => i.id === id);
+  if (!target) return;
+  const before = snapshotItems();
   items = items.filter((i) => i.id !== id);
   saveItems();
   render();
+  offerUndo(`「${target.name}」を削除しました`, before);
 }
 
 function clearDone() {
+  const count = items.filter((i) => i.done).length;
+  if (count === 0) return;
+  const before = snapshotItems();
   items = items.filter((i) => !i.done);
   saveItems();
   render();
+  offerUndo(`完了済み ${count} 件を消しました`, before);
+}
+
+/**
+ * Split the composer text into item names on newlines and Japanese/ASCII commas.
+ * Spaces are kept (e.g. 「ハーゲンダッツ バニラ」 stays one item).
+ */
+function splitItemNames(text) {
+  return String(text || '')
+    .split(/[\n\r、，,]+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
 }
 
 els.form.addEventListener('submit', (e) => {
   e.preventDefault();
-  addItem(els.input.value, els.qty.value, els.store.value);
+  const names = splitItemNames(els.input.value);
+  if (names.length === 0) return;
+  if (names.length === 1) {
+    addItem(names[0], els.qty.value, els.store.value);
+  } else {
+    // Quantity is ambiguous for several items, so it is only used for a single item.
+    for (const name of [...names].reverse()) addItem(name, '', els.store.value);
+    setStatus(`${names.length} 件追加しました`);
+  }
   els.input.value = '';
   els.qty.value = '';
   // Keep store value for consecutive adds to the same destination
@@ -618,12 +709,12 @@ els.saveKeyBtn.addEventListener('click', () => {
 
 els.clearKeyBtn.addEventListener('click', () => {
   setApiKey('');
-  setFlyerProxyUrl('');
+  resetFlyerProxyUrl();
   setFlyerProxySecret('');
   els.apiKeyInput.value = '';
-  els.proxyUrlInput.value = '';
+  els.proxyUrlInput.value = getFlyerProxyUrl();
   els.proxySecretInput.value = '';
-  setSettingsStatus('APIキーとプロキシ設定を削除しました');
+  setSettingsStatus('APIキーとシークレットを削除し、プロキシURLを標準に戻しました');
 });
 
 els.settingsDialog.addEventListener('click', (e) => {

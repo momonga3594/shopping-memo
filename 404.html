@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1"
+    />
+    <meta name="theme-color" content="#2d6a4f" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="買い物メモ" />
+    <meta
+      name="description"
+      content="スマホ向けのシンプルな買い物リスト。購入先ごとの整理、音声入力・AI整理・チラシ画像からの追加に対応。ホーム画面に追加してアプリのように使えます。"
+    />
+    <title>買い物メモ</title>
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="./apple-touch-icon.png" />
+    <link rel="icon" type="image/png" sizes="192x192" href="./icon-192.png" />
+    <script type="module" crossorigin src="/shopping-memo/assets/index-C56RwZJ1.js"></script>
+    <link rel="stylesheet" crossorigin href="/shopping-memo/assets/index-DSKz4H1Q.css">
+  </head>
+  <body>
+    <div id="app" class="app" data-tab="memo">
+      <header class="header">
+        <div class="header-top">
+          <h1 id="app-title" class="title">買い物メモ</h1>
+          <button
+            type="button"
+            id="settings-btn"
+            class="settings-btn"
+            aria-label="設定"
+            title="設定"
+          >
+            ⚙️
+          </button>
+        </div>
+        <div id="list-toolbar" class="list-toolbar">
+          <span id="item-count" class="item-count"></span>
+          <button type="button" id="clear-done-btn" class="clear-done-btn" disabled>
+            完了を消す
+          </button>
+        </div>
+        <p id="flyer-subtitle" class="flyer-subtitle" hidden>
+          チラシ写真から特売商品を読み取り、リストへ追加できます。
+        </p>
+      </header>
+
+      <div class="panels">
+        <section
+          id="panel-memo"
+          class="tab-panel tab-panel-memo"
+          role="tabpanel"
+          aria-labelledby="tab-memo"
+        >
+          <main class="main">
+            <ul id="item-list" class="item-list" aria-label="買い物リスト"></ul>
+            <p id="empty-state" class="empty-state">
+              まだ何もありません。<br />下の欄から追加してください。
+            </p>
+          </main>
+
+          <footer id="composer" class="composer" role="region" aria-label="追加パネル">
+            <p id="voice-status" class="voice-status" role="status" aria-live="polite"></p>
+            <p id="voice-note" class="voice-note" hidden></p>
+            <form id="add-form" class="add-form" autocomplete="off">
+              <div class="input-row">
+                <textarea
+                  id="item-input"
+                  class="item-input"
+                  placeholder="買うもの（「、」で複数）"
+                  rows="1"
+                  maxlength="500"
+                  enterkeyhint="done"
+                  aria-label="買うもの"
+                ></textarea>
+                <button
+                  type="button"
+                  id="mic-btn"
+                  class="mic-btn"
+                  aria-label="音声入力"
+                  title="音声入力"
+                  hidden
+                >
+                  <span class="mic-icon" aria-hidden="true">🎤</span>
+                </button>
+              </div>
+              <div class="meta-row">
+                <div class="meta-field">
+                  <label for="qty-input" class="meta-label">数量（任意）</label>
+                  <input
+                    id="qty-input"
+                    type="text"
+                    class="meta-input"
+                    placeholder="例: 2個"
+                    maxlength="20"
+                    aria-label="数量"
+                  />
+                </div>
+                <div class="meta-field">
+                  <label for="store-input" class="meta-label">購入先（任意）</label>
+                  <input
+                    id="store-input"
+                    type="text"
+                    class="meta-input"
+                    list="store-suggestions"
+                    placeholder="例: イオン"
+                    maxlength="40"
+                    aria-label="購入先"
+                  />
+                  <datalist id="store-suggestions"></datalist>
+                </div>
+              </div>
+              <div class="action-row">
+                <button type="submit" class="add-btn">追加</button>
+                <button type="button" id="ai-organize-btn" class="ai-btn">
+                  AIで整理
+                </button>
+              </div>
+            </form>
+            <p id="composer-store-hint" class="composer-store-hint"></p>
+          </footer>
+        </section>
+
+        <section
+          id="panel-flyer"
+          class="tab-panel tab-panel-flyer"
+          role="tabpanel"
+          aria-labelledby="tab-flyer"
+          hidden
+        >
+          <div class="flyer-panel">
+            <section class="flyer-section" aria-label="画像の選択">
+              <label class="flyer-file-label" for="flyer-file-input">
+                <span class="flyer-file-btn">写真・ギャラリー</span>
+                <input
+                  id="flyer-file-input"
+                  type="file"
+                  accept="image/*"
+                  class="flyer-file-input"
+                />
+              </label>
+
+              <div class="flyer-presets" role="group" aria-label="標準の店舗">
+                <button type="button" class="flyer-preset-btn" data-flyer-preset="uoroku-kandoji">
+                  ウオロク 神道寺
+                </button>
+                <button type="button" class="flyer-preset-btn" data-flyer-preset="aeon-toyano">
+                  イオン とやの店
+                </button>
+                <button type="button" class="flyer-preset-btn" data-flyer-preset="harashin-kurosaki">
+                  原信 黒崎
+                </button>
+              </div>
+
+              <details class="flyer-more">
+                <summary class="flyer-more-summary">ほかの店・URLから読み込む</summary>
+                <div class="flyer-url-row">
+                  <input
+                    id="flyer-url-input"
+                    type="url"
+                    class="flyer-url-input"
+                    placeholder="https://… 画像URL / 店舗ページ"
+                    inputmode="url"
+                    autocomplete="off"
+                    spellcheck="false"
+                    aria-label="チラシ画像またはビューアのURL"
+                  />
+                  <button type="button" id="flyer-url-btn" class="flyer-url-btn">
+                    読み込み
+                  </button>
+                </div>
+                <p class="flyer-help">
+                  イオン・ウオロク・原信の店舗ページ、イオンのチラシビューア、クラシルのウィジェット／店舗URL、画像の直リンクを貼れます。取れないときはスクショを撮って「写真・ギャラリー」から選んでください。
+                </p>
+              </details>
+
+              <div id="flyer-page-picker" class="flyer-page-picker" hidden>
+                <p class="flyer-page-picker-title">ページを選んでください</p>
+                <div id="flyer-page-list" class="flyer-page-list" role="list"></div>
+              </div>
+
+              <div id="flyer-preview-wrap" class="flyer-preview-wrap" hidden>
+                <img
+                  id="flyer-preview"
+                  class="flyer-preview"
+                  alt="選択したチラシのプレビュー"
+                />
+              </div>
+
+              <p id="flyer-status" class="flyer-status" role="status" aria-live="polite"></p>
+            </section>
+
+            <section
+              id="flyer-review"
+              class="flyer-review"
+              hidden
+              aria-label="抽出結果の確認"
+            >
+              <div class="flyer-review-toolbar">
+                <button type="button" id="flyer-select-all" class="flyer-link-btn">
+                  すべて選択
+                </button>
+                <button type="button" id="flyer-deselect-all" class="flyer-link-btn">
+                  すべて解除
+                </button>
+              </div>
+              <ul id="flyer-candidate-list" class="flyer-candidate-list"></ul>
+              <button type="button" id="flyer-meal-btn" class="flyer-meal-btn">
+                この特売で献立
+              </button>
+            </section>
+
+            <section id="flyer-meals" class="flyer-meals" hidden aria-label="献立案">
+              <h2 class="flyer-meals-heading">献立（2人分・3日）</h2>
+              <div id="flyer-meal-list" class="flyer-meal-list"></div>
+            </section>
+
+            <div class="flyer-actions">
+              <button type="button" id="flyer-add-btn" class="flyer-add-btn" disabled>
+                選択したものを追加
+              </button>
+              <button type="button" id="flyer-clear-btn" class="flyer-cancel-btn">
+                クリア
+              </button>
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <div id="undo-toast" class="undo-toast" role="status" aria-live="polite" hidden>
+        <span id="undo-message" class="undo-message"></span>
+        <button type="button" id="undo-btn" class="undo-btn">元に戻す</button>
+      </div>
+
+      <nav class="tab-bar" role="tablist" aria-label="メインメニュー">
+        <button
+          type="button"
+          id="tab-memo"
+          class="tab-btn active"
+          role="tab"
+          aria-selected="true"
+          aria-controls="panel-memo"
+          data-tab="memo"
+        >
+          <span class="tab-icon" aria-hidden="true">📝</span>
+          <span class="tab-label">メモ</span>
+        </button>
+        <button
+          type="button"
+          id="tab-flyer"
+          class="tab-btn"
+          role="tab"
+          aria-selected="false"
+          aria-controls="panel-flyer"
+          data-tab="flyer"
+        >
+          <span class="tab-icon" aria-hidden="true">📰</span>
+          <span class="tab-label">チラシ</span>
+        </button>
+      </nav>
+    </div>
+
+    <dialog id="settings-dialog" class="settings-dialog">
+      <form method="dialog" id="settings-form" class="settings-panel">
+        <div class="settings-handle" aria-hidden="true"></div>
+        <div class="settings-header">
+          <h2 class="settings-title">設定</h2>
+          <button type="submit" class="settings-close" aria-label="閉じる" value="close">
+            ×
+          </button>
+        </div>
+        <label for="api-key-input" class="settings-label">Google Gemini API キー</label>
+        <input
+          id="api-key-input"
+          type="password"
+          class="api-key-input"
+          placeholder="AIza…"
+          autocomplete="off"
+          spellcheck="false"
+        />
+        <p class="settings-help">
+          キーは
+          <a
+            href="https://aistudio.google.com/apikey"
+            target="_blank"
+            rel="noopener noreferrer"
+            >Google AI Studio</a
+          >
+          で取得できます。このブラウザの localStorage
+          にだけ保存され、サーバーには送られません。
+        </p>
+
+        <label for="proxy-url-input" class="settings-label">チラシ画像プロキシ URL</label>
+        <input
+          id="proxy-url-input"
+          type="url"
+          class="api-key-input proxy-url-input"
+          placeholder="https://….workers.dev"
+          inputmode="url"
+          autocomplete="off"
+          spellcheck="false"
+        />
+        <label for="proxy-secret-input" class="settings-label">プロキシ用シークレット（本番は必須）</label>
+        <input
+          id="proxy-secret-input"
+          type="password"
+          class="api-key-input"
+          placeholder="Worker の PROXY_SECRET と同じ値"
+          autocomplete="off"
+          spellcheck="false"
+        />
+        <p class="settings-help">
+          店舗ボタンやチラシURLの読み込みに使います。URL は最初から標準のものが入っているので、ふだんはシークレットだけ入れて保存してください（管理者から受け取った値）。URL を空にして保存すると、ブラウザから直接取得します（失敗しやすい）。
+        </p>
+
+        <div class="settings-actions">
+          <button type="button" id="save-key-btn" class="save-key-btn">保存</button>
+          <button type="button" id="clear-key-btn" class="clear-key-btn">クリア</button>
+        </div>
+        <p id="settings-status" class="settings-status" role="status" aria-live="polite"></p>
+      </form>
+    </dialog>
+
+  </body>
+</html>

@@ -17,14 +17,24 @@ npx wrangler deploy
 
 **本番（このリポジトリ所有者向け）:** `https://shopping-memo-flyer-proxy.momonga3594.workers.dev`
 
-任意の共有シークレット（推奨・Worker URL が公開のとき）:
+### 共有シークレット（PROXY_SECRET）
+
+**本番 Worker には 2026-10-27 から設定済みで、必須です。** アプリ設定の「プロキシ用シークレット」に同じ値が無いと、すべての呼び出しが 401 `unauthorized` になります。
 
 ```bash
-npx wrangler secret put PROXY_SECRET
-# 値を入力（例: 長いランダム文字列）
+openssl rand -hex 32 > /path/outside/repo/secret.txt   # リポジトリ外。コミットしない
+npx wrangler secret put PROXY_SECRET < /path/outside/repo/secret.txt
 ```
 
-未設定（空）のままでも認証なしで動作します。現状の本番は未設定です。
+- `X-Proxy-Secret` ヘッダーと定数時間比較で照合し、**エッジキャッシュ参照より前**に検証します
+- `npx wrangler deploy` で再デプロイしても既存の Secret は保持されます
+- 変更（ローテーション）したら、利用中の全端末のアプリ設定も同じ値に更新してください
+- コード上は、Secret を設定していない Worker（自分で新しく立てた場合など）は認証なしで動きます
+- ローカルで試すときは `.dev.vars`（`.gitignore` 済み、コミット禁止）にダミー値を置きます
+
+### エッジキャッシュ
+
+Cloudflare Cache API（colo 単位）で、resolve の結果を 5 分、画像を 10 分キャッシュします。キーは検証済みのターゲット URL だけで、CORS ヘッダーは応答ごとに付け直します。応答ヘッダー `X-Proxy-Cache: HIT` / `MISS` で確認できます。
 
 ## アプリ側の設定
 
@@ -112,8 +122,9 @@ npx wrangler secret put PROXY_SECRET
 - `https://momonga3594.github.io`
 - `http://localhost:5173` / `http://127.0.0.1:5173`
 - `http://localhost:4173` / `http://127.0.0.1:4173`（vite preview）
+- `http://localhost:8787` / `http://127.0.0.1:8787`（wrangler dev）
 
-`OPTIONS` プリフライトに対応。任意ヘッダ `X-Proxy-Secret`。
+`env.ALLOWED_ORIGINS` で上書きできます。`OPTIONS` プリフライトに対応。ヘッダ `X-Proxy-Secret`（`PROXY_SECRET` 設定時は必須）。
 
 ### エラー JSON 例
 
@@ -135,6 +146,8 @@ npx wrangler secret put PROXY_SECRET
 - ブラウザ風 `User-Agent` を付与
 
 ## ローカル確認
+
+`.dev.vars` に `PROXY_SECRET` を置いた場合は、各 `curl` に `-H "X-Proxy-Secret: <ダミー値>"` を付けてください（無ければ 401）。
 
 ```bash
 npx wrangler dev

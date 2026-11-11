@@ -65,7 +65,7 @@ CORS で直接取得できない画像URL向けに、Cloudflare Worker の小さ
 
 1. ⚙️設定を開く
 2. 「チラシ画像プロキシ URL」に上記 URL をそのまま貼る（末尾スラッシュなし）
-3. 「プロキシ用シークレット（任意）」:
+3. 「プロキシ用シークレット（本番は必須）」:
    - **本番 Worker には `PROXY_SECRET` を設定済み**（2026-10-27〜）。ここに**同じ値**を入力しないと、店舗プリセット・チラシURL解析・画像取得・サムネイルがすべて 401 になります
    - 値はリポジトリには置いていません。管理者から受け取ってください
    - 未入力／不一致のときはチラシタブに「⚙️設定の「プロキシ用シークレット」に…入力して保存してください」と表示されます
@@ -126,19 +126,19 @@ npm run preview
 
 本番は **`gh-pages` ブランチ** から配信します（Vite `base: '/shopping-memo/'`）。
 
-### 自動デプロイ（推奨・一本化）
+### 自動デプロイ（GitHub Actions・導入済み）
 
-予定: `main` への push（または Actions の `workflow_dispatch`）で  
-`.github/workflows/deploy-pages.yml` が `npm ci` → `npm run build` → `dist` を `gh-pages` へ配信します。
+`main` への push（または Actions の `workflow_dispatch`）で  
+`.github/workflows/deploy-pages.yml` が `npm ci` → `npm run build` → `dist` を `gh-pages` へ配信します（2026-10-03 導入、261d333）。
 
 - `.nojekyll` と SPA 用 `404.html`（`index.html` のコピー）は workflow 側で付与します
-- **Actions 導入後は手動で `gh-pages` を触らないでください**（並走すると上書き事故の原因になります）
+- **手動で `gh-pages` を触らないでください**（並走すると上書き事故の原因になります）
+- 反映は [Actions](https://github.com/momonga3594/shopping-memo/actions) の実行結果と公開 URL で確認します
+- Worker（`workers/flyer-proxy`）は Actions ではデプロイされません。変更したときだけ手動で `npx wrangler deploy`
 
-**現状ブロッカー:** workflow ファイルの追加には GitHub OAuth／PAT の **`workflow` スコープ** が必要です。付与されるまで下記の手動デプロイを使います（草案は `docs/examples/deploy-pages.yml`（付与後に `.github/workflows/deploy-pages.yml` へコピー））。
+### 手動デプロイ（Actions 障害時の逃げ道のみ）
 
-### 手動デプロイ（現状の本番更新手段／Actions 不可時の逃げ道）
-
-Actions がリポジトリに入るまでのあいだ、または Actions 障害時:
+Actions が使えないときだけ:
 
 ```bash
 npm ci
@@ -148,7 +148,7 @@ cp dist/index.html dist/404.html
 npx gh-pages -d dist
 ```
 
-自動デプロイが動くようになったら、この手動手順は使わず Actions に一本化してください。
+Actions が復旧したら、この手動手順は使わず Actions に戻してください。
 
 ## 音声入力について
 
